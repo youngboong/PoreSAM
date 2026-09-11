@@ -1,0 +1,13 @@
+# Install GPU PyTorch first; see SETUP.md.
+torch==2.7.1
+torchvision==0.22.1
+numpy
+scipy
+scikit-image
+opencv-python
+pillow
+tifffile
+matplotlib
+pandas
+ipykernel
+SAM-2 @ https://github.com/facebookresearch/sam2/archive/2b90b9f5ceec907a1c18123530e92e794ad901a4.zip

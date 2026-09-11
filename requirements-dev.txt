@@ -1,0 +1,2 @@
+# Optional browser integration checks, using the installed Microsoft Edge.
+playwright==1.62.0

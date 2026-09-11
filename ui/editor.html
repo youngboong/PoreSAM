@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Pore Editor</title>
+<style>
+:root{font-family:'Malgun Gothic',system-ui,sans-serif;color:#253c43;background:#edf2f3;font-size:14px}*{box-sizing:border-box}body{margin:0}header{background:#123e45;color:white;padding:18px 26px;display:flex;align-items:center;gap:22px}h1{font-size:21px;margin:0}header span{color:#c4dddf;font-size:13px}main{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;padding:16px;height:calc(100vh - 65px)}.left{min-width:0;display:flex;flex-direction:column;gap:10px}.toolbar,.panel{background:white;border:1px solid #dbe3e5;border-radius:10px;padding:12px}.toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}button,select,input{font:inherit}button,select{padding:8px 11px;border:1px solid #becfd3;border-radius:6px;background:#fff;color:#253c43}button{cursor:pointer}button:hover{background:#e8f4f3}button.active{background:#d3efeb;border-color:#24847b}button.primary{background:#187b74;color:#fff;border-color:#187b74}button.danger{color:#a83b35}button:disabled{opacity:.45;cursor:default}.viewport{flex:1;overflow:auto;background:#243238;border-radius:9px;min-height:300px;position:relative}canvas#image{display:block;touch-action:none;cursor:crosshair}aside{overflow:auto;display:flex;flex-direction:column;gap:12px}.panel h2{font-size:15px;margin:0 0 12px}.hint{font-size:12px;line-height:1.7;color:#64797f}.status{font-size:13px;padding:10px 14px;background:white;border-radius:8px;min-height:40px}.status.error{background:#ffebdf;color:#963421}.row{display:flex;gap:8px;align-items:center;margin:9px 0}.row>*{min-width:0}.wide{width:100%}.metric{display:grid;grid-template-columns:1fr 1fr;gap:8px}.metric div{padding:10px;background:#edf5f4;border-radius:7px}.metric b{display:block;font-size:21px;padding:4px 0}.metric small{font-size:11px;color:#537179}.choices{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}#overlap{color:#9b5f10;font-size:12px;line-height:1.7}.legend{font-size:12px;color:#506970}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin:0 5px 0 12px}.mini{width:100%;height:150px}a{color:#076c72}.hidden{display:none}label{font-size:12px}.row>label{white-space:nowrap;flex-shrink:0}.notice{font-size:12px;color:#865e25;background:#fff4dd;padding:9px;border-radius:6px;line-height:1.6}@media(max-width:950px){main{grid-template-columns:1fr;height:auto}.viewport{height:65vh}aside{overflow:visible}header span{display:none}}
+</style><link rel="stylesheet" href="/workspace.css"></head><body>
+<header><h1>Pore Editor</h1><span>이미지 설정부터 pore 수정과 분석까지</span></header>
+<nav class="steps" aria-label="작업 단계"><button data-panel="load" class="active" aria-current="step">1. 불러오기</button><button data-panel="setup" disabled>2. 전처리</button><button data-panel="editor" disabled>3. 결과 분석</button><button data-panel="analysis" disabled>4. 결과 보고서</button></nav>
+<section id="loadPanel" class="workspace-panel">
+<div class="workspace-intro"><h2>불러오기</h2><p>새 이미지는 전처리로, 분석된 이미지는 결과 분석 화면으로 이동합니다.</p></div>
+<section class="panel"><h2>새 이미지 불러오기</h2><label class="upload-zone">TIF · PNG · JPG 파일 선택<input id="uploadFile" type="file" accept=".tif,.tiff,.png,.jpg,.jpeg"></label><p class="hint">단일 이미지 · 최대 32MB. 이미 분석한 파일을 다시 선택하면 저장된 분석을 이어서 엽니다.</p>
+<p id="imageSelectionStatus" class="hint" role="status"></p></section>
+<section class="panel image-library"><h2>분석된 이미지 불러오기</h2><p class="hint">이미지를 선택하면 저장된 분석과 최신 수정본을 결과 분석 화면에서 엽니다.</p><p id="libraryStatus" class="hint" role="status"></p><button id="retryLibrary" class="hidden">이미지 목록 다시 불러오기</button><div id="imageLibrary" class="image-cards"></div></section>
+<section id="pendingImagesSection" class="panel image-library hidden"><h2>전처리 이어가기</h2><p class="hint">불러온 뒤 아직 분석하지 않은 이미지입니다.</p><div id="pendingImages" class="image-cards"></div></section>
+</section>
+<section id="setupPanel" class="workspace-panel hidden">
+<div class="workspace-intro"><h2>전처리</h2><p>분석 영역과 스케일을 확인하고, 미리보기를 보며 전처리를 조절하세요.</p></div>
+<div id="newAnalysisSettings" class="setup-grid hidden"><div>
+<section class="panel setup-preview"><h2 id="setupImageTitle">분석할 이미지</h2><p id="imageDetails" class="hint">이미지를 선택하면 미리보기가 표시됩니다.</p><div class="setup-canvas-wrap"><canvas id="setupCanvas" width="800" height="500"></canvas></div><div class="row"><button id="measureScale">스케일바 양 끝 찍기</button><button id="clearScaleLine">측정선 지우기</button></div><p class="hint">청록 선 아래는 분석에서 제외합니다. 스케일바에 적힌 실제 길이는 오른쪽에 입력하세요.</p></section><section class="panel"><h2>실시간 전처리 미리보기</h2><p class="hint">설정을 바꾸면 자동으로 갱신됩니다. 이 영상이 SAM 분석에 사용됩니다.</p><div class="setup-canvas-wrap"><img id="preprocessingImage" alt="설정이 적용된 분석용 영상" style="width:100%;display:block"></div><p id="preprocessingInfo" class="hint" role="status" aria-live="polite"></p></section>
+</div><div>
+<section class="panel"><h2>이미지 크기 확인</h2><p class="hint">이미지의 스케일바에 적힌 길이를 확인해주세요. 면적과 직경 계산에 사용합니다.</p>
+<details id="regionSettings"><summary>분석 영역 조정</summary>
+<label class="field">분석 영역 하단 (px)<input id="analysisBottom" type="number" min="32" step="1"></label><input id="bottomSlider" class="wide" type="range" min="32" max="1000" value="768"><p class="hint">장비 정보가 시작되는 위치까지 분석합니다. 하단 정보가 없으면 이미지 전체 높이를 사용하세요.</p>
+</details><p class="hint">미리보기에서 청록 선 위쪽을 분석합니다. 영역이 맞으면 그대로 진행하세요.</p>
+<div class="two-fields"><label class="field">스케일바에 적힌 길이 (µm)<input id="scaleUm" type="number" min="0.000001" step="any" placeholder="예: 20"></label><label class="field">스케일바 픽셀 길이<input id="scalePixels" type="number" min="1" step="any" placeholder="왼쪽에서 양 끝 찍기"></label></div>
+<p id="calibrationInfo" class="hint">실제 길이와 픽셀 길이를 입력하세요.</p><label><input id="scaleConfirmed" type="checkbox"> 이미지의 스케일바 실제 길이를 확인했습니다.</label></section>
+<section class="panel"><h2>전처리 설정</h2>
+<label class="row"><input id="normalizeEnabled" type="checkbox" role="switch" checked> 밝기 정규화</label>
+<label class="field">Background 제거 강도 <output id="backgroundValue">0 · 끄기</output><input id="backgroundStrength" type="range" min="0" max="30" step="1" value="0"></label><p class="hint">가는 밝은 구조를 약화합니다. 0은 끄기입니다. 실제 앞·뒤 깊이를 구분하는 기능은 아니므로 pore 경계를 확인하세요.</p>
+<label class="field">Blur 방식<select id="blurMethod"><option value="none">사용 안 함</option><option value="gaussian">Gaussian blur · 부드럽게</option><option value="box">평균 blur</option><option value="median">Median · 점 잡음 완화</option><option value="bilateral">Bilateral · 경계 보존</option><option value="kuwahara">Kuwahara · 영역별 평활화</option></select></label>
+<label id="blurStrengthField" class="field hidden">필터 강도 <output id="blurValue">2</output><input id="blurStrength" type="range" min="0" max="10" step="1" value="2"></label><p class="hint">밝기 정규화 → background 제거 → 선택한 필터 순서로 적용합니다.</p></section>
+<section class="panel analysis-start"><button id="runAnalysis" class="primary wide">분석 시작</button><p id="analysisSettingsSummary" class="hint">기본 설정으로 분석합니다. 필요한 경우 아래 고급 설정에서 조정할 수 있습니다.</p><progress id="analysisProgress" class="wide" max="100" value="0"></progress><p id="jobStatus" role="status" aria-live="polite">스케일을 확인한 뒤 분석을 시작하세요.</p></section>
+<details id="advancedSettings" class="panel"><summary>고급 설정 <span>필요할 때만 조정</span></summary><p class="hint">설정은 접어도 유지됩니다. 기본값으로 돌아가려면 아래 ‘기본값 복원’을 누르세요.</p>
+<label class="field">주변과 내부의 최소 밝기 차이<input id="minContrast" type="number" min="0" max="255" step="1" value="8"></label><p class="hint">기본값 8. 낮추면 약한 대비의 영역도 통과하고, 높이면 밝기 차이가 큰 영역을 선택합니다. 이미지 밝기를 바꾸는 설정은 아닙니다.</p>
+<label class="field">최소 후보 면적 (px)<input id="minArea" type="number" min="1" step="1" value="100"></label><p id="minAreaInfo" class="hint"></p>
+<label class="field">탐색 정도<select id="pointDensity"><option value="16">빠르게 확인</option><option value="32">보통</option><option value="48" selected>자세히 · 기본</option><option value="64">더 촘촘하게</option></select></label><button id="resetCriteria">기본값 복원</button></details>
+</div></div></section>
+<main id="editorPanel" class="hidden"><div class="left">
+<div class="toolbar"><label>분석 이력 <select id="dataset"></select></label><button id="reload">다시 불러오기</button><button id="reuseImage">설정 바꿔 새로 분석</button><button id="fitComparison">화면에 맞추기</button><label>확대 <input id="zoom" type="range" min="10" max="250" step="1" value="100"></label><span id="zoomLabel">100%</span></div>
+<div class="toolbar"><label><input type="checkbox" id="showOverlay" checked> pore 표시</label><label>pore 색상 <input id="poreColor" type="color" value="#ffd700"></label><label>채우기 진하기 <input id="poreOpacity" type="range" min="0" max="100" value="40"></label><output id="poreOpacityValue">40%</output><label><input id="showPoreLabels" type="checkbox" checked> 번호 표시</label></div>
+<div class="toolbar" id="tools"><button data-mode="box" class="active">박스</button><button data-mode="ellipse">타원형</button><button data-mode="positive">포함 +</button><button data-mode="negative">제외 −</button><button data-mode="polygon">직접 그리기</button><button data-mode="cut">pore 자르기</button><button id="back">마지막 입력 취소</button><button id="clear">입력 지우기</button></div>
+<div class="hint">Ctrl+Z · 마지막 영역 지정부터 되돌립니다. 입력이 없으면 직전 저장한 수정을 되돌립니다.</div>
+<div class="comparison-viewports"><section class="comparison-pane"><h2>원본 이미지</h2><div class="viewport" id="originalViewport"><canvas id="originalImage" width="1024" height="768"></canvas></div></section><section class="comparison-pane"><h2>분석 결과 · 편집</h2><div class="viewport" id="viewport"><canvas id="image" width="1024" height="768"></canvas></div></section></div>
+<div class="legend"><span id="poreLegendDot" class="dot" style="background:#ffd700"></span>pore <span class="dot" style="background:#ffa623"></span>미리보기 <span class="dot" style="background:#ff5ab4"></span>대체될 후보 · 양쪽 확대·스크롤 동기화 · 오른쪽에서 편집</div>
+<div id="legacyOverlap" class="status hidden"><span id="legacyOverlapText"></span> <button id="resolveOverlaps">겹친 경계 정리 및 저장</button></div><div id="status" class="status" role="status" aria-live="polite">이미지를 불러오는 중입니다.</div>
+</div><aside>
+<section class="panel" id="poreListPanel"><button id="openPoreDetails" class="wide primary">Pore details</button><p class="hint">목록 · Histogram · Scatter plot</p></section>
+<section class="panel"><h2>pore 추가 · 나누기</h2><p class="hint">큰 pore는 박스·타원형으로 지정해 SAM으로 추가하거나, 다각형으로 직접 그리세요. ‘pore 자르기’로 내부를 드래그하면 절단선 양쪽을 별도 pore로 나눕니다.</p><div id="cutSettings" class="hidden"><label class="field">절단 폭 (px)<input id="cutWidth" type="range" min="1" max="30" value="3"><output id="cutWidthValue">3px</output></label><button id="applyCut" class="danger wide">절단 적용 및 저장</button><p class="hint">붉은 경로에 닿는 pore를 자릅니다. 절단 폭만큼 마스크가 지워집니다. 적용 전 경로를 확인하세요.</p></div></section>
+<section class="panel"><h2>1. 영역 지정</h2><p class="hint" id="toolHint">박스나 타원형으로 pore를 둘러싸도록 드래그하세요. 필요하면 포함(+)·제외(−) 점으로 보완합니다.</p><div class="row"><label>작업 대상</label><select class="wide" id="target"><option value="">새 pore 추가</option></select></div><label><input id="fill" type="checkbox" checked> pore 내부 구멍 채우기</label><div class="row"><button id="predict" class="primary wide">SAM 분할 미리보기</button></div></section>
+<section class="panel"><h2>2. 미리보기 확인</h2><div class="hint">후보를 바꿔 보며 pore 외곽을 확인하세요. 미리보기는 통계에 반영되지 않습니다.</div><div id="choices" class="choices"></div><div id="previewInfo" class="hint">아직 미리보기가 없습니다.</div><div id="overlap"></div><div class="row"><button id="apply" class="primary wide" disabled>추가 적용 및 저장</button></div><div class="row"><button id="delete" class="danger" disabled>선택 후보 삭제</button><button id="undo" disabled>적용 실행 취소</button></div><a id="report" class="hidden" target="_blank" rel="noopener">수정본 보고서 열기 ↗</a><p class="hint" id="revision"></p></section>
+<section class="panel"><h2>현재 결과</h2><div class="notice">자동 후보와 사용자 수정 결과입니다. 모든 pore를 검토한 통계는 아닙니다.</div><div class="metric"><div><small>후보 개수</small><b id="count">—</b></div><div><small>후보 면적률</small><b id="fraction">—</b></div><div><small>직경 중앙값</small><b id="diameter">—</b><small>µm · 이미지 경계 접촉 제외</small></div><div><small>이미지 경계 접촉</small><b id="edge">—</b></div></div><p class="hint" id="area"></p><h2>직경 분포</h2><canvas class="mini" id="hist" width="280" height="150"></canvas></section>
+</aside></main>
+<section id="analysisPanel" class="workspace-panel hidden"><div class="workspace-intro"><h2 id="analysisTitle">분석 결과</h2><p id="analysisSubtitle">이미지를 분석하거나 저장된 결과를 선택하세요.</p></div><div class="row"><button id="editFromAnalysis" class="primary">현재 결과 수정하기</button><button id="settingsFromAnalysis">이 이미지로 새 분석 준비</button></div><div id="analysisDownloads" class="download-links"></div><iframe id="analysisFrame" title="면적·개수·직경·공간 분포 보고서"></iframe><section class="panel"><h2>원본과 분할 결과 비교</h2><img id="analysisComparison" alt="원본과 현재 pore 분할 결과 비교"></section></section>
+<dialog id="poreDetailsDialog" aria-labelledby="poreDetailsTitle">
+<div id="poreDetailsHandle" class="details-titlebar"><h2 id="poreDetailsTitle">Pore details</h2><button id="closePoreDetails" aria-label="Pore details 닫기">×</button></div>
+<div class="details-toolbar" role="tablist" aria-label="분석 보기"><button id="detailsTableTab" data-detail-view="table" role="tab" aria-controls="detailsTableView" aria-selected="true" class="active">Details</button><button id="detailsHistogramTab" data-detail-view="histogram" role="tab" aria-controls="detailsPlotView" aria-selected="false">Histogram</button><button id="detailsScatterTab" data-detail-view="scatter" role="tab" aria-controls="detailsPlotView" aria-selected="false">Scatter plot</button><button id="downloadDetails">CSV 저장</button><button id="downloadPlot" class="hidden">그래프 저장</button></div>
+<div class="details-content">
+<div class="details-toolbar"><details id="detailsTargetPicker"><summary>대상 pore 선택 <span id="detailsTargetCount"></span></summary><div class="target-popover"><div class="row"><button id="detailsSelectAll">전체 선택</button><button id="detailsSelectNone">전체 해제</button></div><input id="detailsTargetSearch" type="search" placeholder="ID 검색" aria-label="pore ID 검색"><div id="detailsTargetOptions"></div></div></details><span id="detailsSummary" class="hint"></span></div>
+<div id="detailsTableView" role="tabpanel" aria-labelledby="detailsTableTab"><div class="details-table-wrap"><table id="poreTable"><thead><tr><th>ID</th><th>Length (µm)</th><th>Width (µm)</th><th>Aspect ratio</th><th>Equivalent diameter (µm)</th><th>Roundness</th></tr></thead><tbody id="poreListRows"></tbody><tfoot id="poreDetailsStats"></tfoot></table></div></div>
+<div id="detailsPlotView" class="hidden" role="tabpanel"><div class="details-toolbar"><label id="detailsXAxisLabel">항목 <select id="detailsXAxis"></select></label><label id="detailsYAxisLabel" class="hidden">Y축 <select id="detailsYAxis"></select></label><label id="detailsBinsLabel">구간 수 <select id="detailsBins"><option value="auto">자동</option><option value="5">5</option><option value="10">10</option><option value="20">20</option><option value="30">30</option></select></label></div><div class="details-plot-wrap"><canvas id="detailsPlot" width="1100" height="620" aria-label="선택한 pore의 분포 그래프"></canvas></div><p id="detailsPlotInfo" class="hint" role="status"></p><div class="details-table-wrap plot-stats-wrap"><table id="detailsPlotStats"></table></div></div>
+<div class="row"><span id="poreSelectionInfo" class="hint" role="status">ID 행이나 산점도 점을 클릭하면 이미지에서 강조합니다.</span><button id="clearPoreSelection">강조 해제</button></div>
+<details class="details-definitions"><summary>측정 기준</summary><p>Length·Width는 pore 형태와 동일한 2차 모멘트를 갖는 타원의 장축·단축입니다. Aspect ratio = Length / Width. Equivalent diameter = 2√(면적/π). Roundness = 4 × 면적 / (π × Length²)이며 1에 가까울수록 둥급니다. 3D 구형도는 아닙니다.</p><p>통계와 그래프는 선택한 pore를 기준으로 계산합니다. Std는 표본 표준편차(n−1)이며 유효 값이 2개 미만이면 —로 표시합니다. †는 이미지 경계에 닿아 보이는 부분만 계산한 pore입니다. 정의할 수 없는 값은 —로 표시하고 해당 통계에서 제외합니다.</p></details>
+</div></dialog>
+<script>
+const $=id=>document.getElementById(id),canvas=$('image'),ctx=canvas.getContext('2d');
+let state=null,base=null,outlines=null,previewImage=null,replacementImage=null,preview=null,choice=0,mode='box',points=[],labels=[],box=null,shape=null,polygon=[],drag=null,busy=false;
+let inputHistory=[],cutPath=[];
+function rememberInput(){inputHistory.push(structuredClone({points,labels,box,shape,polygon,cutPath}));if(inputHistory.length>200)inputHistory.shift()}
+function undoInput(){if(!inputHistory.length)return;({points,labels,box,shape,polygon,cutPath}=inputHistory.pop());drag=null;invalidate();draw();setStatus('마지막 영역 지정을 되돌렸습니다.')}
+function setStatus(text,error=false){$('status').textContent=text;$('status').classList.toggle('error',error)}
+function controls(){document.querySelectorAll('button,select,input').forEach(e=>e.disabled=busy);$('applyCut').disabled=busy||!state||cutPath.length<2;$('apply').disabled=busy||!preview||previewConflicts().length>0;$('undo').disabled=busy||!state?.can_undo;$('delete').disabled=busy||!state||!$('target').value;document.querySelectorAll('[data-panel="editor"],[data-panel="analysis"],#reuseImage,#editFromAnalysis,#settingsFromAnalysis').forEach(e=>e.disabled=busy||!state);window.updateWorkspaceControls?.()}
+async function api(route,payload){const res=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Pore-Editor':'1'},body:JSON.stringify(payload)});const data=await res.json();if(!res.ok)throw new Error(data.error||'처리 실패');return data}
+async function work(message,fn){if(busy)return;busy=true;controls();setStatus(message);try{await fn()}catch(e){setStatus(e.message,true)}finally{busy=false;controls()}}
+function image(src){return new Promise((resolve,reject)=>{const im=new Image();im.onload=()=>resolve(im);im.onerror=reject;im.src=src})}
+function invalidate(){preview=null;previewImage=null;replacementImage=null;$('choices').replaceChildren();$('previewInfo').textContent='입력을 지정한 뒤 미리보기를 실행하세요.';updateReplacementInfo();controls()}
+function clear(resetHistory=true){if(resetHistory)inputHistory=[];points=[];labels=[];box=null;shape=null;polygon=[];cutPath=[];drag=null;invalidate();draw()}
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  if(base)ctx.drawImage(base,0,0);
+  window.drawOriginalComparison?.();
+  if(window.drawPoreLayer)window.drawPoreLayer(ctx);else if(outlines&&$('showOverlay').checked)ctx.drawImage(outlines,0,0);
+  window.drawLargeOverview?.(ctx);
+  if(previewImage)ctx.drawImage(previewImage,0,0);
+  if(replacementImage)ctx.drawImage(replacementImage,0,0);
+  window.drawSelectedPore?.(ctx);
+  ctx.lineWidth=2;ctx.strokeStyle='#ffd372';ctx.setLineDash([6,4]);
+  if(box)ctx.strokeRect(box[0],box[1],box[2]-box[0],box[3]-box[1]);
+  if(shape){ctx.beginPath();ctx.ellipse(shape.cx,shape.cy,shape.rx,shape.ry,0,0,2*Math.PI);ctx.stroke();ctx.fillStyle='#ffd372';ctx.fillRect(shape.cx-2,shape.cy-2,4,4)}
+  ctx.setLineDash([]);
+  if(cutPath.length){ctx.strokeStyle='rgba(255,65,65,.8)';ctx.lineWidth=Number($('cutWidth').value);ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();cutPath.forEach((p,i)=>i?ctx.lineTo(...p):ctx.moveTo(...p));ctx.stroke();ctx.lineWidth=2;}
+  points.forEach((p,i)=>{ctx.beginPath();ctx.arc(p[0],p[1],5,0,2*Math.PI);ctx.fillStyle=labels[i]?'#65ff9a':'#ff7171';ctx.fill();ctx.strokeStyle='#152d32';ctx.stroke()});
+  if(polygon.length){ctx.strokeStyle='#ffd372';ctx.beginPath();polygon.forEach((p,i)=>{if(i)ctx.lineTo(...p);else ctx.moveTo(...p)});if(polygon.length>2)ctx.closePath();ctx.stroke();polygon.forEach(p=>{ctx.fillStyle='#ffd372';ctx.fillRect(p[0]-3,p[1]-3,6,6)})}
+}
+function eventPoint(e){const r=canvas.getBoundingClientRect();return [Math.max(0,Math.min(canvas.width-1,(e.clientX-r.left)*canvas.width/r.width)),Math.max(0,Math.min(canvas.height-1,(e.clientY-r.top)*canvas.height/r.height))]}
+function updateDrag(p){
+  if(!drag)return;
+  if(mode==='cut'){if(cutPath.length<1999&&(!cutPath.length||Math.hypot(p[0]-cutPath.at(-1)[0],p[1]-cutPath.at(-1)[1])>=1))cutPath.push(p);return;}
+  if(mode==='box')box=[Math.min(drag[0],p[0]),Math.min(drag[1],p[1]),Math.max(drag[0],p[0]),Math.max(drag[1],p[1])];
+  else {
+    shape={kind:'ellipse',cx:(drag[0]+p[0])/2,cy:(drag[1]+p[1])/2,rx:Math.abs(p[0]-drag[0])/2,ry:Math.abs(p[1]-drag[1])/2};
+  }
+}
+canvas.addEventListener('pointerdown',e=>{if(busy||!state)return;if(window.handleLargePointer?.(eventPoint(e)))return;rememberInput();invalidate();const p=eventPoint(e);if(['box','ellipse','cut'].includes(mode)){drag=p;box=null;shape=null;polygon=[];cutPath=[];updateDrag(p);canvas.setPointerCapture(e.pointerId)}else if(mode==='polygon'){polygon.push(p)}else{points.push(p);labels.push(mode==='positive'?1:0)}draw()});
+canvas.addEventListener('pointermove',e=>{if(!drag)return;updateDrag(eventPoint(e));draw()});
+canvas.addEventListener('pointerup',e=>{if(drag){updateDrag(eventPoint(e));drag=null;draw();controls()}});canvas.addEventListener('pointercancel',()=>{if(drag)undoInput()});
+document.querySelectorAll('[data-mode]').forEach(button=>button.onclick=()=>{window.stopLargePicking?.();cutPath=[];const previous=mode;mode=button.dataset.mode;if(mode==='polygon'||previous==='polygon'||['box','ellipse','cut'].includes(mode)){if(box||shape||polygon.length)rememberInput();box=null;shape=null;polygon=[]}document.querySelectorAll('[data-mode]').forEach(b=>b.classList.toggle('active',b===button));$('cutSettings').classList.toggle('hidden',mode!=='cut');$('predict').classList.toggle('hidden',mode==='cut');$('toolHint').textContent='';$('predict').textContent=mode==='polygon'?'직접 그린 영역 미리보기':'SAM 분할 미리보기';$('toolHint').textContent=mode==='cut'?'나눌 pore 내부를 가로지르도록 드래그하세요. 경로를 확인한 뒤 절단을 적용하세요.':mode==='ellipse'?'pore를 둘러싸도록 대각선으로 드래그하세요. 가로·세로 크기가 같으면 원, 다르면 타원이 됩니다.':mode==='polygon'?'pore 외곽을 차례로 클릭해 다각형을 그리세요.':'필요한 위치에 포함(+)·제외(−) 점을 찍어 경계를 보완하세요. 박스는 드래그해서 지정합니다.';invalidate();draw()});
+$('cutWidth').oninput=()=>{$('cutWidthValue').textContent=$('cutWidth').value+'px';draw()};
+$('applyCut').onclick=()=>work('pore를 나누고 통계를 저장합니다.',async()=>{await accept(await api('cut',{...payload(),path:cutPath,width:Number($('cutWidth').value)}));setStatus('절단을 저장했습니다. Ctrl+Z로 복원할 수 있습니다.')});
+$('clear').onclick=()=>{if(points.length||box||shape||polygon.length||cutPath.length)rememberInput();clear(false)};$('back').onclick=undoInput;
+$('zoom').oninput=()=>{const zoom=Number($('zoom').value);canvas.style.width=(canvas.width*zoom/100)+'px';$('zoomLabel').textContent=zoom+'%'};$('showOverlay').onchange=draw;$('fill').onchange=()=>{invalidate();draw()};
+function histogram(rows){const h=$('hist'),c=h.getContext('2d');c.clearRect(0,0,h.width,h.height);const values=rows.filter(r=>r.included_in_size_distribution).map(r=>r.equivalent_diameter_um);if(!values.length)return;const max=Math.max(...values),n=12,bins=Array(n).fill(0);values.forEach(v=>bins[Math.min(n-1,Math.floor(v/max*n))]++);const top=Math.max(...bins);c.fillStyle='#187b74';bins.forEach((v,i)=>c.fillRect(25+i*20,120-v/top*96,18,v/top*96));c.fillStyle='#607078';c.font='11px sans-serif';c.fillText('0',20,140);c.fillText(max.toFixed(1)+' µm',218,140);c.fillText(top+'개',2,15)}
+function showSavedLocation(data){
+  let links=$('saveLinks');
+  if(!links){links=document.createElement('p');links.id='saveLinks';links.className='hint';links.style.overflowWrap='anywhere';$('revision').after(links)}
+  links.replaceChildren();
+  if(data.saved_folder){
+    links.append(document.createTextNode('저장 위치: '+data.saved_folder),document.createElement('br'));
+    const a=document.createElement('a');a.href=data.image_url;a.target='_blank';a.rel='noopener';a.textContent='수정 이미지 비교 열기';links.append(a);
+  }
+  $('legacyOverlap').classList.toggle('hidden',!data.stats.overlap_pixels);$('legacyOverlapText').textContent='저장된 기존 결과에 '+(data.stats.overlap_pixels||0)+'px 겹침이 있습니다. 정리하면 공유 픽셀을 하나의 pore에만 배정한 수정본을 저장합니다.';
+  window.onEditorAccepted?.(data);
+  window.onPoreListState?.(data);
+  window.onLargeState?.(data);
+}
+async function accept(data){state=data;[base,outlines]=await Promise.all([image(data.image),image(data.overlay)]);canvas.width=data.width;canvas.height=data.height;if(window.loadComparisonLayers){await window.loadComparisonLayers(data);window.resizeComparison()}else $('zoom').oninput();$('target').replaceChildren(new Option('새 pore 추가',''));data.candidates.forEach(c=>$('target').add(new Option(c.candidate_id+'번 · '+c.area_um2.toFixed(1)+' µm²',c.candidate_id)));clear();$('apply').textContent='추가 적용 및 저장';const s=data.stats;$('count').textContent=s.candidate_count;$('fraction').textContent=s.candidate_union_area_percent.toFixed(2)+'%';$('diameter').textContent=s.complete_equivalent_diameter_um_median?.toFixed(2)??'—';$('edge').textContent=s.edge_candidate_count;$('area').textContent='분석 면적 '+s.analyzed_area_um2.toFixed(1)+' µm² · 후보 합집합 '+s.union_candidate_area_um2.toFixed(1)+' µm²';$('revision').textContent=data.revision?'수정본 '+data.revision+' 저장됨':'기존 자동 결과';$('report').classList.toggle('hidden',!data.report_url);if(data.report_url)$('report').href=data.report_url;histogram(data.candidates);showSavedLocation(data);controls()}
+async function load(){await work('이미지와 저장된 결과를 불러오는 중입니다.',async()=>{await accept(await api('load',{dataset:$('dataset').value}));setStatus('누락된 pore에 박스 또는 포함(+) 점을 지정하세요.')})}
+$('dataset').onchange=load;$('reload').onclick=load;$('target').onchange=()=>{updateReplacementInfo();controls()};
+function payload(){return {dataset:state.dataset,revision:state.revision}}
+function previewConflicts(){const p=preview?.choices[choice];return (p?.intersecting_ids??[]).filter(id=>!(p?.contained_ids??[]).includes(id)&&String(id)!==$('target').value)}
+const trimOverlapButton=document.createElement('button');trimOverlapButton.id='trimOverlap';trimOverlapButton.className='wide hidden';trimOverlapButton.textContent='다른 pore와 겹친 부분 제외';$('overlap').after(trimOverlapButton);
+$('apply').setAttribute('aria-describedby','overlap');
+trimOverlapButton.onclick=()=>work('다른 pore를 유지하며 겹친 부분을 제외합니다.',async()=>{
+  const target=$('target').value;
+  const data=await api('trim-preview-overlap',{...payload(),token:preview.token,choice,target_id:target?Number(target):null});
+  await presentPreview(data);
+  setStatus(data.split_count>1?'겹침을 제외하니 '+data.split_count+'개 영역으로 나뉘었습니다. 추가할 영역을 선택하고 적용하세요.':'겹친 '+data.trimmed_overlap_pixels+'px를 제외했습니다. 새 경계를 확인한 뒤 대체 및 저장을 누르세요.');
+});
+function updateReplacementInfo(){
+  const p=preview?.choices[choice],target=$('target').value,ids=new Set(p?.contained_ids??[]);
+  if(target)ids.add(Number(target));
+  $('apply').textContent=ids.size&&p?'기존 '+ids.size+'개 대체 및 저장':target?'선택 후보 교체 및 저장':'추가 적용 및 저장';
+  const messages=[];
+  if(p){
+    if(ids.size)messages.push('대체 대상: '+[...ids].sort((a,b)=>a-b).map(id=>id+'번').join(', ')+'. 적용하면 이 후보들을 새 영역 하나로 대체합니다.');
+    if(p.contained_ids.length)messages.push('분홍 윤곽은 새 영역보다 작고 면적의 '+Math.round(preview.containment_threshold*100)+'% 이상이 포함된 후보입니다.');
+    if(p.overlap_percent>0)messages.push('기존 후보와 '+p.overlap_percent.toFixed(1)+'% 겹칩니다. 대체 대상 외의 후보는 유지됩니다.');
+  }
+  const conflicts=previewConflicts();
+  if(conflicts.length)messages.unshift('저장할 수 없는 이유: 대체 대상 외의 '+conflicts.join(', ')+'번 pore와 일부 겹칩니다. 아래 버튼으로 겹친 부분을 제외하거나, 영역을 다시 지정하세요.');
+  trimOverlapButton.classList.toggle('hidden',!conflicts.length);
+  $('apply').title=conflicts.length?'다른 pore와 겹친 부분을 먼저 처리해주세요.':'';
+  $('overlap').textContent=messages.join(' ');controls();
+}
+async function selectChoice(i){const current=preview;choice=i;const p=current.choices[i];const images=await Promise.all([image(p.image),image(p.replacement_image)]);if(preview!==current||choice!==i)return;[previewImage,replacementImage]=images;draw();document.querySelectorAll('#choices button').forEach((b,j)=>b.classList.toggle('active',i===j));$('previewInfo').textContent='면적 '+p.area_um2.toFixed(2)+' µm²';updateReplacementInfo()}
+async function presentPreview(data){preview=data;$('choices').replaceChildren();data.choices.forEach((p,i)=>{const b=document.createElement('button');b.textContent='후보 '+(i+1);b.disabled=true;b.onclick=()=>work('선택한 후보를 표시합니다.',()=>selectChoice(i));$('choices').append(b)});await selectChoice(0)}
+$('predict').onclick=()=>work(mode==='polygon'?'그린 영역을 확인하는 중입니다.':'SAM 분할 중입니다. 첫 실행은 모델 준비에 시간이 걸립니다.',async()=>{const data=await api(mode==='polygon'?'polygon':'predict',{...payload(),points,labels,box,shape,polygon,fill_holes:$('fill').checked});await presentPreview(data);setStatus('미리보기입니다. 경계와 대체 대상을 확인하고 적용하세요.')});
+$('apply').onclick=()=>work('수정본을 저장하고 통계·보고서를 갱신하는 중입니다.',async()=>{const target=$('target').value;const data=await api('apply',{...payload(),token:preview.token,choice,target_id:target?Number(target):null});await accept(data);setStatus('적용했습니다. 수정본 보고서에서 갱신된 분포를 볼 수 있습니다.')});
+$('delete').onclick=()=>work('선택 후보를 삭제하고 통계를 갱신하는 중입니다.',async()=>{await accept(await api('delete',{...payload(),target_id:Number($('target').value)}));setStatus('삭제했습니다. 적용 실행 취소로 복원할 수 있습니다.')});
+$('resolveOverlaps').onclick=()=>work('겹친 경계를 정리하고 통계를 저장합니다.',async()=>{await accept(await api('resolve-overlaps',payload()));setStatus('겹침을 정리한 수정본을 저장했습니다. 변경된 경계를 확인해주세요.')});
+$('undo').onclick=()=>work('이전 마스크를 복원하고 통계를 갱신하는 중입니다.',async()=>{await accept(await api('undo',payload()));setStatus('직전 적용을 취소하고 복원본을 저장했습니다.')});
+document.addEventListener('keydown',event=>{
+  if(!(event.ctrlKey||event.metaKey)||event.altKey||event.shiftKey||(event.code!=='KeyZ'&&event.key.toLowerCase()!=='z'))return;
+  if($('editorPanel').classList.contains('hidden'))return;
+  const target=event.target;
+  if(target instanceof Element&&(target.closest('input,textarea,select')||target.isContentEditable))return;
+  event.preventDefault();
+  if(busy||drag||event.repeat)return;
+  if(preview?.choices?.[0]?.pool_candidate_id){invalidate();draw()}else if(inputHistory.length)undoInput();else if(state?.can_undo)$('undo').click();
+});
+$('undo').title='저장한 직전 적용을 되돌립니다. Ctrl+Z는 영역 지정부터 차례로 되돌립니다.';
+$('back').title='Ctrl+Z · 마지막 영역 지정 되돌리기';
+(async()=>{try{const data=await (await fetch('/api/datasets')).json();data.datasets.forEach(d=>$('dataset').add(new Option(data.labels?.[d]??d,d)));setStatus('이미지를 선택해 분석을 시작하세요.');controls()}catch(e){setStatus('서버에 연결할 수 없습니다: '+e.message,true)}})();
+</script><script src="/workspace.js"></script><script src="/comparison.js"></script><script src="/pore-list.js"></script><script src="/pore-details.js"></script></body></html>
