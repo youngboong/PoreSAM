@@ -1,4 +1,4 @@
-# Install GPU PyTorch first; see SETUP.md.
+# Install CPU or GPU PyTorch first; see SETUP.md.
 torch==2.7.1
 torchvision==0.22.1
 numpy

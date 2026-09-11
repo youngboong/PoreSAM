@@ -22,6 +22,7 @@ from pore_preprocessing import preprocessing_config, prepare_image, adjustable_c
 from segment_first_pass import (detect_footer, detect_scale_bar, candidates_from_masks,
                                 ProgressGenerator, overlay)
 from sam2.build_sam import build_sam2
+from sam_runtime import inference_context, release_device_cache
 
 
 class ProjectWorkflow:
@@ -207,11 +208,12 @@ class ProjectWorkflow:
     def run(self, job_id, project, config, run_id, number):
         folder = self.root/project['id']/'runs'/run_id
         try:
-            # Serialize GPU operations and report rendering with manual edits.
+            # Serialize model operations and report rendering with manual edits.
             with self.editor.lock:
                 self.editor.predictor = None
                 self.editor.encoded_dataset = None
-                if torch.cuda.is_available(): torch.cuda.empty_cache()
+                device = self.editor.device
+                release_device_cache(device)
                 source = (self.root/project['id']/'input/normalized.png').resolve()
                 gray = np.asarray(Image.open(source))[:config['analysis_bottom']]
                 preprocessing=self.preprocessing(project,config)
@@ -237,15 +239,14 @@ class ProjectWorkflow:
                     with np.load(read_artifact(cached,'raw_masks.npz'),allow_pickle=False) as data:
                         raw = [dict(item,segmentation=data[f'mask_{i}'].copy()) for i,item in enumerate(metadata)]
                 else:
-                    if not torch.cuda.is_available(): raise ValueError('SAM 분석에 사용할 CUDA GPU를 찾을 수 없습니다.')
-                    self.progress(job_id,5,'SAM 모델을 준비하고 있습니다.')
-                    with torch.inference_mode(),torch.autocast('cuda',dtype=torch.bfloat16):
-                        model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device='cuda',apply_postprocessing=False)
+                    self.progress(job_id,5,f'SAM 모델을 준비하고 있습니다. ({device.upper()})')
+                    with inference_context(device):
+                        model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device=device,apply_postprocessing=False)
                         generator = ProgressGenerator(model,**settings)
                         generator.progress_callback = lambda n:self.progress(job_id,min(80,10+int(70*n/math.ceil(settings['points_per_side']**2/8))),'이미지에서 pore 후보 영역을 찾고 있습니다.')
                         raw = generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
                     del generator,model
-                    torch.cuda.empty_cache()
+                    release_device_cache(device)
                     metadata = [{k:v for k,v in item.items() if k!='segmentation'} for item in raw]
                 self.progress(job_id,82,'밝기 차이·크기·포함 관계로 후보를 고르고 있습니다.')
                 selected = candidates_from_masks(raw,sam_gray,config['min_contrast'],config['min_area_pixels'])
@@ -256,20 +257,19 @@ class ProjectWorkflow:
                 selection = dict(min_contrast=config['min_contrast'],min_area_pixels=config['min_area_pixels'])
                 report = dict(image=str(source),source_name=project['name'],analysis_bottom_exclusive=config['analysis_bottom'],
                               scale=dict(label_um=config['scale_um'],length_pixels=config['scale_pixels'],um_per_pixel=config['scale_um']/config['scale_pixels'],label_source='user confirmed in Pore Editor'),
-                              model='SAM 2.1 Small',settings=settings,selection_settings=selection,
+                              model='SAM 2.1 Small',settings=settings,selection_settings=selection,report_deferred=True,
+                              inference_device=report.get('inference_device','unknown') if cached else device,
                               raw_mask_count=len(raw),entrance_candidate_count=len(masks),
                               raw_masks_reused_from=str(cached) if cached else None,
                               preprocessing_config=preprocessing,preprocessing_metadata=preprocessing_metadata,
                               sam_input_image=str(sam_input.resolve()),
                               overlay_relative_path='images/entrance_candidates_overlay.png',
                               status='unreviewed automatic candidates',normalization=project['normalization'],
-                              selection=f"largest component >=90%; area {config['min_area_pixels']}px..12%; ring contrast >={config['min_contrast']}; fill enclosed holes; suppress >80% containment",
+                              selection=f"largest component >=90%; area {config['min_area_pixels']}px..20%; ring contrast >={config['min_contrast']}; fill enclosed holes; suppress >80% containment",
                               candidates=[{k:v for k,v in item.items() if k!='mask'} for item in selected])
                 (folder/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-                self.progress(job_id,90,'이미지와 면적·개수·직경·공간 분포를 저장하고 있습니다.')
-                self.image_exporter(folder,gray,masks)
+                self.progress(job_id,90,'분석 마스크를 저장하고 있습니다. 보고서는 편집 완료 후 생성하세요.')
                 overlay(gray,[a['segmentation'] for a in raw]).save(write_artifact(folder,'raw_sam_overlay.png'))
-                export_folder(folder)
             dataset = project['id']+'__'+run_id
             with self.lock:
                 current = self.projects[project['id']]

@@ -67,6 +67,7 @@ def main():
             assert overlap_pixels(state['masks'].values())==0
             assert all(np.array_equal(state['masks'][i],m) for i,m in before.items())
             assert page.locator('#largeReview').is_hidden()
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             summary=json.loads((run/'edits'/dataset/'revision_0001/measurements/summary.json').read_text())
             assert summary['candidate_count']==len(before)+1
             page.locator('#status').click();page.keyboard.press('Control+z');page.wait_for_function('!busy && state.revision===2',timeout=60000)

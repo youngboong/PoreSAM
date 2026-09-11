@@ -112,7 +112,7 @@ def large_consensus(masks):
 
 def generate_large_pores(gray,predictor,progress=lambda percent,message:None,strength='medium'):
     """Same automatic proposal/point pipeline as the GF comparison, without references."""
-    import torch
+    from sam_runtime import inference_context
     if strength not in ['medium','strong']:raise ValueError('구조 약화 강도를 다시 선택해주세요.')
     input_fraction=.009 if strength=='medium' else .018
     proposals=[];merged=[];simplified=None
@@ -124,7 +124,7 @@ def generate_large_pores(gray,predictor,progress=lambda percent,message:None,str
             if fraction==input_fraction:simplified=pixels
     proposals=deduplicate(deduplicate(proposals)+deduplicate(merged))
     chosen=[];audit=[]
-    with torch.inference_mode(),torch.autocast('cuda',dtype=torch.bfloat16):
+    with inference_context(str(predictor.device).split(':')[0]):
         predictor.set_image(cv2.cvtColor(simplified,cv2.COLOR_GRAY2RGB))
         for i,proposal in enumerate(proposals):
             if i%5==0:progress(42+int(53*i/max(1,len(proposals))),'큰 pore의 윤곽을 확인하고 있습니다.')

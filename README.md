@@ -26,6 +26,8 @@ python scripts/pore_editor.py
 
 브라우저에서 http://127.0.0.1:8765 를 엽니다. 자세한 사용법은 [EDITOR.md](EDITOR.md)에 있습니다.
 
+GPU가 없으면 CPU를 자동으로 사용합니다. CPU 실행을 강제하려면 `python scripts/pore_editor.py --device cpu`로 실행하세요. CPU 전용 PyTorch 설치 방법은 [SETUP.md](SETUP.md)에 있습니다.
+
 ## 저장소 구성
 
 - `ui/`: 사용자 화면

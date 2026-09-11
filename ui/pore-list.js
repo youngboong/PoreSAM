@@ -1,40 +1,47 @@
 (() => {
-  let selected=null,currentDataset=null,generation=0,mask=null,tintedColor=null;
+  let selected=new Set(),currentDataset=null,generation=0,mask=null,tintedColor=null;
+  let pickEpoch=0,pickQueue=Promise.resolve(),pendingPicks=0;
   const tinted=document.createElement('canvas');
-  const sources={automatic:'자동',manual_polygon:'직접 그림',prompted_sam:'SAM 추가',manual_cut:'절단'};
-  const format=(value,digits=2)=>Number(value).toLocaleString(undefined,{minimumFractionDigits:digits,maximumFractionDigits:digits});
   function contrastColor(){
-    const hex=$('poreColor').value,base=[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
-    const choices=['#ff00ff','#00ffff','#ffff00'];
+    const base=[1,3,5].map(i=>parseInt($('poreColor').value.slice(i,i+2),16));
     const distance=color=>[1,3,5].reduce((sum,i,j)=>sum+(parseInt(color.slice(i,i+2),16)-base[j])**2,0);
-    return choices.sort((a,b)=>distance(b)-distance(a))[0];
+    return ['#ff00ff','#00ffff','#ffff00'].sort((a,b)=>distance(b)-distance(a))[0];
   }
   function selectionRows(){
-    document.querySelectorAll('#poreListRows tr').forEach(row=>{
-      const active=Number(row.dataset.id)===selected;
+    document.querySelectorAll('#poreListRows tr[data-id]').forEach(row=>{
+      const active=selected.has(Number(row.dataset.id));
       row.classList.toggle('selected',active);row.setAttribute('aria-selected',String(active));
     });
+    $('selectedPoreCount').textContent=selected.size+'개 선택';
   }
-  function clearSelection(){
-    generation++;selected=null;mask=null;selectionRows();$('poreSelectionInfo').textContent='pore를 선택하세요.';draw();
-  }
-  async function selectPore(id,center=true){
-    selected=id;mask=null;tintedColor=null;selectionRows();draw();
-    const version=++generation,dataset=state.dataset,revision=state.revision;
-    const row=state.candidates.find(c=>c.candidate_id===id);
-    $('poreSelectionInfo').textContent=id+'번 pore 표시 중…';
+  async function renderSelection(centerId=null){
+    const version=++generation;mask=null;tintedColor=null;selectionRows();draw();controls();
+    if(!state||!selected.size){$('poreSelectionInfo').textContent='pore를 선택하세요.';return}
+    const dataset=state.dataset,revision=state.revision,ids=[...selected];
+    $('poreSelectionInfo').textContent=ids.length+'개 pore 선택 · Ctrl+클릭으로 추가/제외';
+    if(ids.length===1){
+      const row=state.candidates.find(c=>c.candidate_id===ids[0]);
+      if(row)$('poreSelectionInfo').textContent=ids[0]+'번 · '+row.area_um2.toFixed(2)+' µm² · 직경 '+row.equivalent_diameter_um.toFixed(2)+' µm · Roundness '+(row.roundness==null?'—':row.roundness.toFixed(3));
+    }
     try{
-      const result=await api('pore-highlight',{dataset,revision,candidate_id:id});
+      const result=await api('pore-highlight',{dataset,revision,candidate_ids:ids});
       const loaded=await image(result.image);
       if(version!==generation||state?.dataset!==dataset||state?.revision!==revision)return;
-      mask=loaded;
-      $('poreSelectionInfo').textContent=id+'번 · '+format(row.area_um2)+' µm² · 직경 '+format(row.equivalent_diameter_um)+' µm · Roundness '+(row.roundness==null?'—':format(row.roundness,3));
-      draw();
-      if(center){
-        const scale=canvas.getBoundingClientRect().width/canvas.width;
-        for(const view of [$('viewport'),$('originalViewport')])view.scrollTo(Math.max(0,row.centroid_x_pixels*scale-view.clientWidth/2),Math.max(0,row.centroid_y_pixels*scale-view.clientHeight/2));
+      mask=loaded;draw();
+      if(centerId!==null){
+        const row=state.candidates.find(c=>c.candidate_id===centerId);
+        if(row){
+          const scale=canvas.getBoundingClientRect().width/canvas.width;
+          for(const view of [$('viewport'),$('originalViewport')])view.scrollTo(Math.max(0,row.centroid_x_pixels*scale-view.clientWidth/2),Math.max(0,row.centroid_y_pixels*scale-view.clientHeight/2));
+        }
       }
-    }catch(error){if(version===generation)$('poreSelectionInfo').textContent=error.message;}
+    }catch(error){if(version===generation)setStatus(error.message,true)}
+  }
+  function clearSelection(){pickEpoch++;selected.clear();renderSelection()}
+  function selectPore(id,toggle=false,center=true){
+    if(toggle){if(selected.has(id))selected.delete(id);else selected.add(id)}
+    else selected=new Set([id]);
+    return renderSelection(center?id:null);
   }
   window.drawSelectedPore=context=>{
     if(!mask)return;
@@ -48,14 +55,38 @@
     context.save();context.globalAlpha=.8;context.drawImage(tinted,0,0);context.restore();
   };
   window.onPoreListState=data=>{
-    generation++;mask=null;
-    if(currentDataset!==data.dataset||!data.candidates.some(c=>c.candidate_id===selected))selected=null;
-    currentDataset=data.dataset;
-    window.renderPoreDetails?.(data);selectionRows();
-    if(selected!==null)selectPore(selected,false);else $('poreSelectionInfo').textContent='pore를 선택하세요.';
+    pickEpoch++;generation++;mask=null;
+    const existing=new Set(data.candidates.map(c=>c.candidate_id));
+    selected=currentDataset!==data.dataset?new Set():new Set([...selected].filter(id=>existing.has(id)));
+    currentDataset=data.dataset;window.renderPoreDetails?.(data);renderSelection();
   };
-  window.selectPoreFromDetails=id=>{if(!busy&&state?.candidates.some(c=>c.candidate_id===id))selectPore(id)};
-  window.getHighlightedPore=()=>selected;
+  window.selectPoreFromDetails=(id,toggle=false)=>{
+    if(!busy&&state?.candidates.some(c=>c.candidate_id===id)){pickEpoch++;selectPore(id,toggle)}
+  };
+  window.getSelectedPores=()=>[...selected].sort((a,b)=>a-b);
+  window.getHighlightedPore=()=>selected.values().next().value??null;
+  window.isPoreSelectionPending=()=>pendingPicks>0;
+  window.pickPoreAtPoint=(point,toggle=false)=>{
+    const epoch=pickEpoch,dataset=state.dataset,revision=state.revision;
+    pendingPicks++;controls();
+    // Keep rapid Ctrl-clicks in input order, even if requests finish at different times.
+    pickQueue=pickQueue.then(async()=>{
+      if(epoch!==pickEpoch||state?.dataset!==dataset||state?.revision!==revision||mode!=='select'||busy)return;
+      const result=await api('pore-at-point',{dataset,revision,point});
+      if(epoch!==pickEpoch||state?.dataset!==dataset||state?.revision!==revision||mode!=='select'||busy)return;
+      if(result.candidate_id===null){if(!toggle){selected.clear();await renderSelection()}return}
+      await selectPore(result.candidate_id,toggle,false);
+      if(epoch===pickEpoch&&mode==='select')setStatus(selected.size+'개 pore 선택 · Ctrl+클릭으로 추가/제외 · Delete로 삭제');
+    }).catch(error=>{if(epoch===pickEpoch)setStatus(error.message,true)}).finally(()=>{pendingPicks--;controls()});
+    return pickQueue;
+  };
   window.clearPoreHighlight=clearSelection;
   $('clearPoreSelection').onclick=clearSelection;
+  $('clearImageSelection').onclick=clearSelection;
+  $('selectBoundaryPores').onclick=()=>{
+    if(busy||!state)return;
+    if(mode!=='select')document.querySelector('[data-mode="select"]').click();
+    pickEpoch++;selected=new Set(state.candidates.filter(c=>c.touches_image_edge).map(c=>c.candidate_id));
+    renderSelection();setStatus('경계 pore '+selected.size+'개 선택 · 남길 pore를 Ctrl+클릭으로 제외한 뒤 Delete를 누르세요.');
+  };
 })();

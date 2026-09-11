@@ -11,6 +11,7 @@ import numpy as np
 import torch
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from sam_runtime import release_device_cache
 
 from fiber_pores import generate_large_pores
 from pore_overlap import review_groups
@@ -60,16 +61,15 @@ class LargePoreSearch:
                 if (folder/'complete.json').is_file() and (folder/'masks.npz').is_file():
                     with np.load(folder/'masks.npz',allow_pickle=False) as data:count=len(data.files)
                 else:
-                    if not torch.cuda.is_available():raise ValueError('큰 pore 탐색에 사용할 GPU를 찾을 수 없습니다.')
                     self.editor.predictor=None;self.editor.encoded_dataset=None
-                    torch.cuda.empty_cache()
-                    model=build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device='cuda',apply_postprocessing=False)
+                    release_device_cache(self.editor.device)
+                    model=build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device=self.editor.device,apply_postprocessing=False)
                     predictor=SAM2ImagePredictor(model)
                     try:
                         masks,audit=generate_large_pores(gray,predictor,lambda p,m:self.progress(job_id,p,m),strength=strength)
                     finally:
                         del predictor,model
-                        torch.cuda.empty_cache()
+                        release_device_cache(self.editor.device)
                     np.savez_compressed(folder/'masks.pending.npz',**{f'candidate_{i+1}':m for i,m in enumerate(masks)})
                     (folder/'masks.pending.npz').replace(folder/'masks.npz')
                     (folder/'prompts.json').write_text(json.dumps(audit,indent=2),encoding='utf-8')

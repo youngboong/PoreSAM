@@ -70,6 +70,7 @@ def main():
             count=len(state['masks'])
             page.locator('#apply').click()
             page.wait_for_function('!busy && state.revision===1',timeout=60000)
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             assert (run/'edits'/dataset/'revision_0001/measurements/summary.json').is_file()
             assert (run/'edits'/dataset/'revision_0001/images/comparison.png').is_file()
             page.locator('#status').click()

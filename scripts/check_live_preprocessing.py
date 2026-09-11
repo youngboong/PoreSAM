@@ -112,6 +112,7 @@ def main():
             assert not (state['masks'][1]&state['masks'][2]).any()
             remaining=sum(int(m.sum()) for m in state['masks'].values())
             assert remaining==int(mask.sum())-3*140
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             summary=json.loads((run/'edits'/dataset/'revision_0001/measurements/summary.json').read_text())
             assert summary['candidate_count']==2 and summary['union_candidate_area_um2']==remaining*.25
             page.screenshot(path=str(run/'cut_result.png'))

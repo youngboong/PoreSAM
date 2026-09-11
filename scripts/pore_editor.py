@@ -28,10 +28,17 @@ from large_pore_search import LargePoreSearch
 from pore_overlap import exclusive_existing,overlap_pixels
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
+from sam_runtime import configure_device, inference_context
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASETS = ["PI35_5kx-4_bse", "PI35_2kx-4_BSE8", "PI100_2kx_bse"]
 CONTAINMENT_THRESHOLD = .95
+
+
+def validated_candidate_ids(masks, ids):
+    if not isinstance(ids,list) or not ids or any(type(i) is not int or i not in masks for i in ids):
+        raise ValueError('선택한 pore를 확인해주세요.')
+    return sorted(set(ids))
 
 
 def contained_candidates(mask, masks):
@@ -91,7 +98,8 @@ def save_images(folder,gray,masks):
 
 
 class Editor:
-    def __init__(self, output_root=None, project_root=None):
+    def __init__(self, output_root=None, project_root=None, device='auto'):
+        self.device = configure_device(device)
         self.output_root = Path(output_root or ROOT / "outputs" / "manual_edits")
         self.states = {}
         self.predictor = None
@@ -211,12 +219,16 @@ class Editor:
             cv2.putText(label_rgba,str(candidate_id),(int(x)-6,int(y)+4),cv2.FONT_HERSHEY_SIMPLEX,.36,(0,0,0,255),2)
             cv2.putText(label_rgba,str(candidate_id),(int(x)-6,int(y)+4),cv2.FONT_HERSHEY_SIMPLEX,.36,(255,255,255,255),1)
         result_base = f"/files/{state['dataset']}/revision_{state['revision']:04d}" if state['revision'] else f"/baseline-files/{state['dataset']}"
-        report_url = result_base + '/measurements/index.html'
+        folder = self.revision_folder(state['dataset'],state['revision']) if state['revision'] else state['baseline']
+        stored_report = json.loads((folder/'report.json').read_text(encoding='utf-8'))
+        report_ready = (folder/'measurements/index.html').is_file() and (not stored_report.get('report_deferred') or (folder/'report_ready.json').is_file())
+        report_url = result_base + '/measurements/index.html' if report_ready else None
         return dict(dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
                     image=png_url(Image.fromarray(state["gray"])),overlay=png_url(Image.fromarray(rgba)),
                     fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
                     stats=stats, candidates=table.astype(object).where(table.notna(),None).to_dict(orient="records"),can_undo=bool(state["history"]),report_url=report_url,
-                    image_url=result_base+'/images/comparison.png',result_base=result_base,
+                    image_url=result_base+'/images/comparison.png' if report_ready else None,result_base=result_base,report_ready=report_ready,
+                    export_default_directory=str(ROOT/'outputs/exports'),
                     selection_settings=state['report'].get('selection_settings',dict(min_contrast=8,min_area_pixels=100)),
                     saved_folder=str(self.revision_folder(state["dataset"],state["revision"])) if state["revision"] else None)
 
@@ -275,9 +287,9 @@ class Editor:
                 raise ValueError("박스·타원형 또는 포함(+) 점을 지정해주세요.")
             if selection is not None:
                 effective_prompts=dict(box=box.tolist(),points=coords.tolist(),labels=labels)
-            with torch.inference_mode(),torch.autocast("cuda",dtype=torch.bfloat16):
+            with inference_context(self.device):
                 if self.predictor is None:
-                    model=build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml",str(ROOT/"checkpoints/sam2.1_hiera_small.pt"),device="cuda",apply_postprocessing=False)
+                    model=build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml",str(ROOT/"checkpoints/sam2.1_hiera_small.pt"),device=self.device,apply_postprocessing=False)
                     self.predictor=SAM2ImagePredictor(model)
                 if self.encoded_dataset!=state["dataset"]:
                     self.predictor.set_image(cv2.cvtColor(state.get('sam_gray',state['gray']),cv2.COLOR_GRAY2RGB))
@@ -362,21 +374,40 @@ class Editor:
         folder.mkdir()
         report=copy.deepcopy(state["report"])
         report.update(image=str((ROOT/report["image"]).resolve()),entrance_candidate_count=len(masks),
-                      revision=revision,candidate_annotations=annotations,status="user edited candidates; not all objects reviewed",
+                      revision=revision,candidate_annotations=annotations,status="user edited candidates; not all objects reviewed",report_deferred=True,
                       overlay_relative_path="images/entrance_candidates_overlay.png",
                       candidates=[dict(candidate_id=i,area=int(m.sum())) for i,m in sorted(masks.items())])
         np.savez_compressed(folder/"entrance_candidates.npz",**{f"candidate_{i}":m for i,m in sorted(masks.items())})
         (folder/"report.json").write_text(json.dumps(report,indent=2),encoding="utf-8")
-        save_images(folder,state["gray"],masks)
         meta=dict(revision=revision,parent_revision=state["revision"],history=history,next_id=next_id,annotations=annotations,action=action)
         (folder/"edit.json").write_text(json.dumps(meta,indent=2),encoding="utf-8")
-        export_folder(folder)
-        # Only publish the revision after masks, statistics and report all succeed.
+        # Publish durable masks and history immediately; reports are explicitly requested later.
         pending=parent/"latest.pending.json"
         pending.write_text(json.dumps(dict(revision=revision)),encoding="utf-8")
         pending.replace(parent/"latest.json")
         state.update(masks=masks,annotations=annotations,history=history,next_id=next_id,revision=revision,preview=None)
         return self.response(state)
+
+    def generate_report(self,state,payload):
+        self.check_revision(state,payload)
+        directory=payload.get('export_directory')
+        if directory is not None:
+            if not isinstance(directory,str) or not directory.strip() or not Path(directory.strip()).expanduser().is_absolute():
+                raise ValueError('저장 폴더의 전체 경로를 지정해주세요.')
+        folder = self.revision_folder(state['dataset'],state['revision']) if state['revision'] else state['baseline']
+        stored = json.loads((folder/'report.json').read_text(encoding='utf-8'))
+        ready = (folder/'measurements/index.html').is_file() and (not stored.get('report_deferred') or (folder/'report_ready.json').is_file())
+        if not ready:
+            save_images(folder,state['gray'],state['masks'])
+            export_folder(folder)
+            pending = folder/'report_ready.pending.json'
+            pending.write_text(json.dumps(dict(revision=state['revision'])),encoding='utf-8')
+            pending.replace(folder/'report_ready.json')
+        result=self.response(state)
+        if directory is not None:
+            from report_bundle import export_bundle
+            result['exported_folder']=export_bundle(self,state,directory)
+        return result
 
     def mutate(self,state,payload,action):
         self.check_revision(state,payload)
@@ -419,41 +450,43 @@ class Editor:
                 changed.append(dict(candidate_id=candidate_id, resulting_ids=child_ids))
             if not changed: raise ValueError('절단 경로가 pore와 겹치지 않습니다.')
             return self.save(state,masks,annotations,history,next_id,dict(type='cut', path=path.tolist(),width=width,changed=changed))
+        if action=='delete':
+            ids=validated_candidate_ids(masks,payload.get('target_ids',[payload.get('target_id')]))
+            for candidate_id in ids:
+                del masks[candidate_id]
+                annotations.pop(str(candidate_id),None)
+            detail=dict(type='delete',candidate_ids=ids)
+            if len(ids)==1:detail['candidate_id']=ids[0]
+            return self.save(state,masks,annotations,history,next_id,detail)
         target=payload.get("target_id")
         if target is not None and (type(target) is not int or target not in masks):
             raise ValueError("수정할 후보 번호를 확인해주세요.")
-        if action=="delete":
-            if target is None: raise ValueError("삭제할 후보를 선택해주세요.")
-            del masks[target]
-            annotations.pop(str(target),None)
-            detail=dict(type="delete",candidate_id=target)
-        else:
-            preview=state["preview"]
-            if not preview or payload.get("token")!=preview["token"]: raise ValueError("미리보기를 다시 실행해주세요.")
-            choice=payload.get("choice",0)
-            if type(choice) is not int or not 0<=choice<len(preview["masks"]): raise ValueError("후보 선택을 확인해주세요.")
-            mask=preview["masks"][choice]
-            contained_ids=contained_candidates(mask,masks)
-            replaced_ids=sorted(set(contained_ids + ([target] if target is not None else [])))
-            conflicts=[i for i,old in masks.items() if i not in replaced_ids and (mask&old).any()]
-            if conflicts:
-                raise ValueError('기존 pore '+', '.join(map(str,conflicts))+'번과 일부 겹칩니다. 경계를 보완하거나 교체할 대상을 선택해주세요. 겹치는 상태로는 저장할 수 없습니다.')
-            if target is None:
-                target=next_id
-                next_id+=1
-            # Exact or near duplicate additions usually mean the user intended a replacement.
-            for old_id,old in masks.items():
-                if old_id not in replaced_ids and (mask&old).sum()/(mask|old).sum()>.9:
-                    raise ValueError(f"기존 {old_id}번과 거의 같은 영역입니다. 해당 번호를 선택해 교체해주세요.")
-            for old_id in replaced_ids:
-                del masks[old_id]
-                annotations.pop(str(old_id),None)
-            masks[target]=mask
-            annotations[str(target)]=dict(source=preview["source"],review_status="user_accepted",prompts=preview["prompts"],
-                                          replaced_candidate_ids=replaced_ids)
-            detail=dict(type="apply",candidate_id=target,source=preview["source"],prompts=preview["prompts"],
-                        replaced_candidate_ids=replaced_ids,contained_candidate_ids=contained_ids,
-                        containment_threshold=CONTAINMENT_THRESHOLD)
+        preview=state["preview"]
+        if not preview or payload.get("token")!=preview["token"]: raise ValueError("미리보기를 다시 실행해주세요.")
+        choice=payload.get("choice",0)
+        if type(choice) is not int or not 0<=choice<len(preview["masks"]): raise ValueError("후보 선택을 확인해주세요.")
+        mask=preview["masks"][choice]
+        contained_ids=contained_candidates(mask,masks)
+        replaced_ids=sorted(set(contained_ids + ([target] if target is not None else [])))
+        conflicts=[i for i,old in masks.items() if i not in replaced_ids and (mask&old).any()]
+        if conflicts:
+            raise ValueError('기존 pore '+', '.join(map(str,conflicts))+'번과 일부 겹칩니다. 경계를 보완하거나 교체할 대상을 선택해주세요. 겹치는 상태로는 저장할 수 없습니다.')
+        if target is None:
+            target=next_id
+            next_id+=1
+        # Exact or near duplicate additions usually mean the user intended a replacement.
+        for old_id,old in masks.items():
+            if old_id not in replaced_ids and (mask&old).sum()/(mask|old).sum()>.9:
+                raise ValueError(f"기존 {old_id}번과 거의 같은 영역입니다. 해당 번호를 선택해 교체해주세요.")
+        for old_id in replaced_ids:
+            del masks[old_id]
+            annotations.pop(str(old_id),None)
+        masks[target]=mask
+        annotations[str(target)]=dict(source=preview["source"],review_status="user_accepted",prompts=preview["prompts"],
+                                      replaced_candidate_ids=replaced_ids)
+        detail=dict(type="apply",candidate_id=target,source=preview["source"],prompts=preview["prompts"],
+                    replaced_candidate_ids=replaced_ids,contained_candidate_ids=contained_ids,
+                    containment_threshold=CONTAINMENT_THRESHOLD)
         return self.save(state,masks,annotations,history,next_id,detail)
 
 
@@ -517,6 +550,12 @@ def make_handler(editor):
                 limit=45_000_000 if self.path=='/api/upload' else 1_000_000
                 if not 0<length<limit: raise ValueError("입력이 너무 큽니다.")
                 payload=json.loads(self.rfile.read(length))
+                if self.path=='/api/choose-export-folder':
+                    import subprocess,sys
+                    picker="import tkinter as tk; from tkinter import filedialog; r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True); p=filedialog.askdirectory(title='PoreSAM - Select export folder',parent=r); print(p,flush=True); r.destroy()"
+                    selected=subprocess.run([sys.executable,'-c',picker],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                    if selected.returncode:raise ValueError('폴더 선택 창을 열 수 없습니다. 경로를 직접 입력해주세요.')
+                    return self.send(200,dict(directory=selected.stdout.strip()))
                 if self.path=='/api/upload':
                     result=editor.receive_image(payload.get('name',''),base64.b64decode(payload.get('content',''),validate=True))
                     return self.send(200,result)
@@ -544,17 +583,23 @@ def make_handler(editor):
                 with editor.lock:
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
+                    elif self.path=='/api/generate-report': result=editor.generate_report(state,payload)
                     elif self.path=='/api/details-plot':
                         editor.check_revision(state,payload)
                         from pore_details_export import export_plot
                         result=export_plot(state,payload)
+                    elif self.path=='/api/pore-at-point':
+                        editor.check_revision(state,payload)
+                        x,y=np.floor(editor.coords([payload.get('point')],state['gray'].shape)[0]).astype(int)
+                        candidate_id=next((i for i,mask in sorted(state['masks'].items()) if mask[y,x]),None)
+                        result=dict(candidate_id=candidate_id)
                     elif self.path=='/api/pore-highlight':
                         editor.check_revision(state,payload)
-                        candidate_id=payload.get('candidate_id')
-                        if type(candidate_id) is not int or candidate_id not in state['masks']:raise ValueError('목록에서 pore를 다시 선택해주세요.')
-                        mask=state['masks'][candidate_id]
+                        ids=validated_candidate_ids(state['masks'],payload.get('candidate_ids',[payload.get('candidate_id')]))
+                        mask=np.zeros(state['gray'].shape,bool)
+                        for candidate_id in ids:mask|=state['masks'][candidate_id]
                         rgba=np.zeros((*mask.shape,4),np.uint8);rgba[mask]=(255,255,255,255)
-                        result=dict(image=png_url(Image.fromarray(rgba)),candidate_id=candidate_id)
+                        result=dict(image=png_url(Image.fromarray(rgba)),candidate_ids=ids,candidate_id=ids[0] if len(ids)==1 else None)
                     elif self.path=='/api/large-search': result=editor.large_search.start(state,payload)
                     elif self.path=='/api/large-overview': result=editor.large_search.overview(state,payload)
                     elif self.path=='/api/large-pick': result=editor.large_search.pick(state,payload)
@@ -586,8 +631,11 @@ class LocalPoreServer(ThreadingHTTPServer):
 if __name__=="__main__":
     parser=argparse.ArgumentParser()
     parser.add_argument("--port",type=int,default=8765)
+    parser.add_argument('--device',choices=['auto','cpu','cuda'],default='auto',help='auto: use CUDA if available, otherwise CPU')
     args=parser.parse_args()
-    try:server=LocalPoreServer(("127.0.0.1",args.port),make_handler(Editor()))
+    try:editor=Editor(device=args.device)
+    except ValueError as exc:parser.error(str(exc))
+    try:server=LocalPoreServer(("127.0.0.1",args.port),make_handler(editor))
     except OSError as exc:parser.error(f'포트 {args.port}에 서버를 열 수 없습니다. 이미 실행 중인 Pore Editor를 확인해주세요. ({exc})')
-    print(f"Pore Editor: http://127.0.0.1:{args.port} | workspace-image-library-v4 | {Path(__file__).resolve()}",flush=True)
+    print(f"Pore Editor: http://127.0.0.1:{args.port} | Device: {editor.device.upper()} | {Path(__file__).resolve()}",flush=True)
     server.serve_forever()

@@ -50,6 +50,7 @@ def main():
             assert set(state['masks'])=={3,4}
             assert np.array_equal(state['masks'][3],masks[3])
             assert not (state['masks'][3]&state['masks'][4]).any()
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             summary=json.loads((run/'edits'/dataset/'revision_0001/measurements/summary.json').read_text())
             assert summary['candidate_count']==2 and summary['overlap_pixels']==0
             page.wait_for_load_state('networkidle');assert not errors,errors

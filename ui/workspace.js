@@ -196,16 +196,33 @@ window.onEditorAccepted=data=>{
   updateHistory(data.dataset);
   $('analysisTitle').textContent='결과 보고서 · '+($('dataset').selectedOptions[0]?.textContent??data.dataset)+' · '+(data.revision?'수정본 '+data.revision:'자동 분석');
   $('analysisSubtitle').textContent='후보 '+data.stats.candidate_count+'개 · 면적률 '+data.stats.candidate_union_area_percent.toFixed(2)+'% · 현재 결과의 면적·직경·공간 분포';
-  $('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url;
+  const ready=Boolean(data.report_ready??data.report_url);
+  $('analysisFrame').classList.toggle('hidden',!ready);$('analysisComparison').closest('section').classList.toggle('hidden',!ready);
+  if(ready){$('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url}
+  else{$('analysisFrame').removeAttribute('src');$('analysisComparison').removeAttribute('src')}
+  if(!$('exportDirectory').value){try{$('exportDirectory').value=localStorage.getItem('poreExportDirectory')||data.export_default_directory||''}catch{$('exportDirectory').value=data.export_default_directory||''}}
+  $('generateReport').textContent=ready?'보고서·이미지 저장':'보고서 생성 및 저장';
+  if($('exportResult').dataset.revisionKey!==data.dataset+':'+data.revision)$('exportResult').textContent='';
+  $('reportGenerationStatus').textContent=ready?'현재 수정본의 보고서가 생성되어 있습니다.':'편집 결과는 저장되어 있습니다. 결과 분석을 마쳤으면 보고서를 생성하세요.';
   $('analysisDownloads').replaceChildren();
   for(const [name,file] of [['후보별 CSV','candidates.csv'],['직경 분포 CSV','diameter_histogram.csv'],['면적 분포 CSV','area_histogram.csv'],['영역별 CSV','spatial_grid.csv'],['요약 JSON','summary.json'],['PDF 보고서','dashboard.pdf']]){
-    const a=document.createElement('a');a.textContent=name;a.href=data.result_base+'/measurements/'+file;a.download=file;$('analysisDownloads').append(a);
+    if(ready){const a=document.createElement('a');a.textContent=name;a.href=data.result_base+'/measurements/'+file;a.download=file;$('analysisDownloads').append(a)}
   }
-  $('report').textContent='결과 보고서 보기 →';$('report').onclick=e=>{e.preventDefault();showPanel('analysis')};
+  $('report').classList.remove('hidden');$('report').textContent='결과 보고서 →';$('report').onclick=e=>{e.preventDefault();showPanel('analysis')};
   // Refresh badges after manual saves without reloading the active mask.
   readImageLibrary().then(acceptLibrary).catch(libraryFailed);
 };
 $('editFromAnalysis').onclick=()=>showPanel('editor');
+$('generateReport').onclick=()=>work('결과 보고서를 생성하고 있습니다.',async()=>{
+  const directory=$('exportDirectory').value.trim();
+  if(!directory){$('exportDirectory').focus();throw new Error('저장 폴더를 지정해주세요.')}
+  $('reportGenerationStatus').textContent='이미지·측정값·그래프·PDF를 생성하고 있습니다…';
+  try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='저장 완료: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('원본·분석 이미지와 보고서를 함께 저장했습니다.')}
+  catch(error){$('reportGenerationStatus').textContent='생성 실패: '+error.message+' 다시 생성할 수 있습니다.';throw error}
+});
+$('chooseExportDirectory').onclick=()=>work('저장 폴더를 선택하세요.',async()=>{const result=await api('choose-export-folder',{});if(result.directory)$('exportDirectory').value=result.directory;setStatus('저장 폴더를 확인한 뒤 보고서를 생성하세요.')});
+window.updateToolLayout=()=>{$('selectionActions').classList.toggle('hidden',mode!=='select')};
+window.updateToolLayout();
 $('editFromAnalysis').textContent='결과 분석으로 돌아가기';
 $('settingsFromAnalysis').textContent='전처리 다시 설정';
 $('settingsFromAnalysis').onclick=()=>workspaceWork('이 이미지로 새 분석을 준비하고 있습니다.',()=>prepareExisting(state.dataset));

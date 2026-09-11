@@ -66,6 +66,8 @@ def main():
             state=editor.state("PI35_5kx-4_bse")
             assert state["annotations"]["16"]["source"]=="prompted_sam"
             assert state["revision"]==1
+            assert not (run/"edits/PI35_5kx-4_bse/revision_0001/measurements").exists()
+            editor.generate_report(state,dict(revision=1))
             assert (run/"edits/PI35_5kx-4_bse/revision_0001/measurements/dashboard.pdf").is_file()
             revision_folder=run/"edits/PI35_5kx-4_bse/revision_0001"
             for filename in ["original.png","entrance_candidates_overlay.png","comparison.png","union_mask.png"]:
@@ -129,6 +131,7 @@ def main():
             folder=editor.revision_folder(state['dataset'],4)
             meta=json.loads((folder/'edit.json').read_text(encoding='utf-8'))
             assert meta['action']['replaced_candidate_ids']==[added]
+            editor.generate_report(state,dict(revision=state['revision']))
             summary=json.loads((folder/'measurements/summary.json').read_text(encoding='utf-8'))
             assert summary['candidate_count']==77
             expected_union=np.logical_or.reduce(list(state['masks'].values())).sum()*state['report']['scale']['um_per_pixel']**2
@@ -185,6 +188,8 @@ def main():
             page.wait_for_function('state.revision === 7 && !busy',timeout=120000)
             assert np.array_equal(state['masks'][16],expected)
             assert state['annotations']['16']['prompts']['shape']==ellipse
+            assert not (editor.revision_folder(state['dataset'],7)/'measurements').exists()
+            editor.generate_report(state,dict(revision=7))
             assert (editor.revision_folder(state['dataset'],7)/'measurements/summary.json').is_file()
             page.locator('#undo').click()
             page.wait_for_function('state.revision === 8 && !busy',timeout=120000)

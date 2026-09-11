@@ -118,6 +118,7 @@ def main():
             assert page.request.get(url+page.locator('#analysisComparison').get_attribute('src')).status==200
             baseline=editor.baseline(dataset)
             report=json.loads((baseline/'report.json').read_text())
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             summary=json.loads((baseline/'measurements/summary.json').read_text())
             assert report['selection_settings']==dict(min_contrast=8,min_area_pixels=100)
             assert report['settings']['points_per_side']==16
@@ -141,6 +142,7 @@ def main():
             page.wait_for_function('(old)=>state?.dataset !== old && !busy',arg=dataset,timeout=120000)
             second=page.evaluate('state.dataset')
             second_folder=editor.baseline(second)
+            editor.generate_report(editor.state(page.evaluate('state.dataset')),dict(revision=page.evaluate('state.revision')))
             summary2=json.loads((second_folder/'measurements/summary.json').read_text())
             assert summary2['candidate_count']==0
             assert summary2['selection_settings']['min_contrast']==255

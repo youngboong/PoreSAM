@@ -13,6 +13,7 @@ import tifffile
 import torch
 from sam2.automatic_mask_generator import SAM2AutomaticMaskGenerator
 from sam2.build_sam import build_sam2
+from sam_runtime import configure_device, inference_context
 from result_paths import read_artifact, write_artifact
 
 
@@ -73,7 +74,7 @@ def candidates_from_masks(raw, gray, min_contrast=8, min_area=100):
             continue
         filled = ndi.binary_fill_holes(largest)
         area = int(filled.sum())
-        if area < min_area or area > gray.size * 0.12:
+        if area < min_area or area > gray.size * 0.20:
             continue
         ring = ndi.binary_dilation(filled, iterations=4) & ~filled
         contrast = float(gray[ring].mean() - gray[filled].mean()) if ring.any() else 0
@@ -116,6 +117,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", type=Path, default=Path("data/PI35_5kx-4_bse.tif"))
     parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/sam2.1_hiera_small.pt"))
+    parser.add_argument('--device', choices=['auto','cpu','cuda'], default='auto')
     parser.add_argument("--output", type=Path, help="Defaults to outputs/<image stem>_first_pass")
     parser.add_argument("--scale-um", type=float, required=True, help="Visually checked scale-bar label in micrometers (not OCR)")
     parser.add_argument("--reuse", action="store_true")
@@ -124,6 +126,7 @@ def main():
     parser.add_argument("--min-contrast", type=float, default=8)
     parser.add_argument("--min-area", type=int, default=100)
     args = parser.parse_args()
+    device = configure_device(args.device)
     if args.output is None:
         args.output = Path("outputs") / f"{args.image.stem}_first_pass"
     args.output.mkdir(parents=True, exist_ok=True)
@@ -150,9 +153,9 @@ def main():
         with np.load(read_artifact(args.output, "raw_masks.npz")) as data:
             raw = [dict(item, segmentation=data[f"mask_{i}"]) for i, item in enumerate(metadata)]
     else:
-        print("Loading SAM 2.1 Small on CUDA", flush=True)
-        with torch.inference_mode(), torch.autocast("cuda", dtype=torch.bfloat16):
-            model = build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml", str(args.checkpoint), device="cuda", apply_postprocessing=False)
+        print(f"Loading SAM 2.1 Small on {device.upper()}", flush=True)
+        with inference_context(device):
+            model = build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml", str(args.checkpoint), device=device, apply_postprocessing=False)
             generator = ProgressGenerator(model, **settings)
             raw = generator.generate(cv2.cvtColor(roi, cv2.COLOR_GRAY2RGB))
         metadata = [{k: v for k, v in item.items() if k != "segmentation"} for item in raw]
@@ -175,11 +178,12 @@ def main():
     comparison.save(write_artifact(args.output, "comparison.png"))
     report = dict(image=str(args.image), analysis_bottom_exclusive=footer_y, scale=scale,
                   model="SAM 2.1 Small", settings=settings, raw_mask_count=len(raw),
+                  inference_device=previous_report.get('inference_device','unknown') if args.reuse else device,
                   entrance_candidate_count=len(selected), elapsed_seconds=time.monotonic()-started,
                   status="exploratory, not validated pore counts or areas",
                   overlay_relative_path="images/entrance_candidates_overlay.png",
                   selection_settings=dict(min_contrast=args.min_contrast,min_area_pixels=args.min_area),
-                  selection=f"largest component >=90%; area {args.min_area}px..12%; ring contrast >={args.min_contrast}; fill enclosed holes; suppress >=80% containment",
+                  selection=f"largest component >=90%; area {args.min_area}px..20%; ring contrast >={args.min_contrast}; fill enclosed holes; suppress >=80% containment",
                   candidates=[{k:v for k,v in item.items() if k != "mask"} for item in selected])
     (args.output / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     print(f"Saved {len(selected)} entrance candidates to {args.output}", flush=True)

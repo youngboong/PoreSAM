@@ -26,15 +26,15 @@
     return fragment;
   }
   function renderTable(){
-    const fragment=document.createDocumentFragment(),highlight=window.getHighlightedPore?.();
+    const fragment=document.createDocumentFragment(),highlight=new Set(window.getSelectedPores?.()??[]);
     for(const candidate of selectedRows()){
       const row=document.createElement('tr');row.dataset.id=candidate.candidate_id;row.tabIndex=0;
-      row.classList.toggle('selected',candidate.candidate_id===highlight);row.setAttribute('aria-selected',String(candidate.candidate_id===highlight));
+      row.classList.toggle('selected',highlight.has(candidate.candidate_id));row.setAttribute('aria-selected',String(highlight.has(candidate.candidate_id)));
       const id=document.createElement('td');id.textContent=candidate.candidate_id+(candidate.touches_image_edge?' †':'');
       id.title=({manual_polygon:'직접 그리기',prompted_sam:'SAM 추가',manual_cut:'절단',automatic:'자동 분석'})[candidate.source]??'사용자 수정';row.append(id);
       tableMetrics.forEach(([key])=>{const cell=document.createElement('td');cell.textContent=format(candidate[key]);row.append(cell)});
-      row.onclick=()=>window.selectPoreFromDetails?.(candidate.candidate_id);
-      row.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();row.click()}};
+      row.onclick=event=>window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey);
+      row.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey)}};
       fragment.append(row);
     }
     if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='선택한 pore가 없습니다.';row.append(cell);fragment.append(row)}
