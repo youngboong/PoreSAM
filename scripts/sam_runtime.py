@@ -12,7 +12,7 @@ def select_device(requested='auto'):
         return 'cpu'
     available = torch.cuda.is_available()
     if requested == 'cuda' and not available:
-        raise ValueError('CUDA GPU를 사용할 수 없습니다. --device cpu 또는 auto로 실행해주세요.')
+        raise ValueError('CUDA is unavailable. Use --device cpu or auto.')
     return 'cuda' if available else 'cpu'
 
 

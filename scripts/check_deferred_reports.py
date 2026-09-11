@@ -40,6 +40,15 @@ def main():
     from unittest.mock import patch
     editor.workflow.persist(editor.workflow.projects[project['id']])
     state=editor.state(dataset)
+    # A legacy report is not reused as English; only explicit generation upgrades it.
+    marker=folder/'measurements/report_format.json'
+    marker.write_text(json.dumps(dict(language='ko',version=1)))
+    with patch('pore_editor.export_folder',side_effect=AssertionError('Implicit report generation')):
+        assert not editor.response(state)['report_ready']
+    assert editor.generate_report(state,dict(revision=0))['report_ready']
+    assert json.loads(marker.read_text())==dict(language='en',version=1)
+    assert 'lang="en"' in (folder/'measurements/index.html').read_text(encoding='utf-8')
+    assert state['revision']==0 and set(state['masks'])=={1,2}
     with patch('pore_editor.export_folder',side_effect=AssertionError('Unexpected report export')), patch('pore_editor.save_images',side_effect=AssertionError('Unexpected image export')):
         response=editor.mutate(state,dict(revision=0,target_id=1),'delete')
     revision=editor.revision_folder(dataset,1)
@@ -66,7 +75,7 @@ def main():
             browser=p.chromium.launch(executable_path=r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',headless=True)
             page=browser.new_page(viewport=dict(width=1500,height=1000));page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.server_port}')
-            page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
+            page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
             page.locator('[data-panel=analysis]').click()
             assert page.locator('#generateReport').is_visible() and not page.locator('#analysisFrame').is_visible()
             assert page.locator('#analysisDownloads a').count()==0

@@ -46,7 +46,7 @@ class ProjectWorkflow:
 
     def datasets(self):
         with self.lock:
-            return {run['dataset']: (self.root/p['id']/'runs'/run['id'], f"{p['name']} · 분석 {run['number']}")
+            return {run['dataset']: (self.root/p['id']/'runs'/run['id'], f"{p['name']} · Analysis {run['number']}")
                     for p in self.projects.values() for run in p.get('runs', [])}
 
     def list_projects(self):
@@ -63,37 +63,37 @@ class ProjectWorkflow:
 
     def upload(self, name, content, seed=None):
         if not content or len(content) > 32*1024*1024:
-            raise ValueError('32MB 이하의 이미지 파일을 선택해주세요.')
+            raise ValueError('Choose an image up to 32 MB.')
         suffix = Path(name).suffix.lower()
         if suffix not in ['.tif', '.tiff', '.png', '.jpg', '.jpeg']:
-            raise ValueError('TIF, PNG 또는 JPG 이미지를 선택해주세요.')
+            raise ValueError('Choose a TIF, PNG or JPG image.')
         try:
             if suffix in ['.tif', '.tiff']:
                 with tifffile.TiffFile(io.BytesIO(content)) as tif:
                     if len(tif.pages) != 1:
-                        raise ValueError('한 장으로 된 TIF 이미지를 선택해주세요.')
+                        raise ValueError('Choose a single-page TIF image.')
                     page = tif.pages[0]
                     if math.prod(page.shape) > 32_000_000:
-                        raise ValueError('이미지가 너무 큽니다. 분석할 영역을 잘라 다시 선택해주세요.')
+                        raise ValueError('Image is too large. Crop it and try again.')
                     pixels = page.asarray()
             else:
                 with Image.open(io.BytesIO(content)) as image:
                     if image.width*image.height > 16_000_000:
-                        raise ValueError('이미지가 너무 큽니다. 분석할 영역을 잘라 다시 선택해주세요.')
+                        raise ValueError('Image is too large. Crop it and try again.')
                     pixels = np.asarray(image.convert('RGB'))
         except (OSError, tifffile.TiffFileError) as exc:
-            raise ValueError('이미지 파일을 읽을 수 없습니다.') from exc
+            raise ValueError('Cannot read image.') from exc
         if pixels.ndim not in [2, 3] or (pixels.ndim == 3 and pixels.shape[2] not in [3, 4]):
-            raise ValueError('흑백 또는 RGB 단일 이미지만 지원합니다.')
+            raise ValueError('Only single grayscale or RGB images are supported.')
         if min(pixels.shape[:2]) < 32 or np.prod(pixels.shape[:2]) > 16_000_000:
-            raise ValueError('이미지 크기는 각 변 32px 이상, 전체 1600만 픽셀 이하로 지정해주세요.')
+            raise ValueError('Image dimensions must be at least 32 px, with at most 16 million pixels.')
         if pixels.dtype.kind not in 'uif' or not np.isfinite(pixels).all():
-            raise ValueError('지원하지 않는 이미지 밝기 형식입니다.')
+            raise ValueError('Unsupported pixel format.')
         original_dtype = str(pixels.dtype)
         normalization = None
         if pixels.dtype != np.uint8:
             low, high = float(pixels.min()), float(pixels.max())
-            if high <= low: raise ValueError('밝기 변화가 없는 이미지입니다.')
+            if high <= low: raise ValueError('Image has no intensity variation.')
             pixels = np.clip((pixels.astype(np.float64)-low)*255/(high-low), 0, 255).astype(np.uint8)
             normalization = dict(method='linear min-max to uint8', low=low, high=high)
         gray = cv2.cvtColor(pixels[:,:,:3], cv2.COLOR_RGB2GRAY) if pixels.ndim == 3 else pixels
@@ -133,7 +133,7 @@ class ProjectWorkflow:
 
     def inspect(self, project_id):
         with self.lock:
-            if project_id not in self.projects: raise ValueError('이미지를 다시 선택해주세요.')
+            if project_id not in self.projects: raise ValueError('Select the image again.')
             p = copy.deepcopy(self.projects[project_id])
         p['preview_url'] = f"/project-files/{project_id}/input/normalized.png"
         return p
@@ -143,21 +143,21 @@ class ProjectWorkflow:
         for name in ['analysis_bottom','scale_um','scale_pixels','min_contrast','min_area_pixels','points_per_side']:
             value = payload.get(name)
             if isinstance(value, bool) or not isinstance(value, (int,float)) or not math.isfinite(value):
-                raise ValueError('분석 영역, 스케일, 밝기 차이와 최소 면적을 숫자로 입력해주세요.')
+                raise ValueError('Enter numeric region, scale, contrast and area values.')
             values[name] = value
         if int(values['analysis_bottom']) != values['analysis_bottom'] or not 32 <= values['analysis_bottom'] <= project['height']:
-            raise ValueError('분석 영역의 하단 위치를 이미지 범위 안에 지정해주세요.')
+            raise ValueError('Set the bottom boundary within the image.')
         if not 0 < values['scale_um'] <= 1e6 or not 1 <= values['scale_pixels'] <= math.hypot(project['width'],project['height']):
-            raise ValueError('스케일바의 실제 길이와 픽셀 길이를 확인해주세요.')
+            raise ValueError('Check the scale lengths in micrometers and pixels.')
         if not 0 <= values['min_contrast'] <= 255:
-            raise ValueError('밝기 차이는 0~255 사이로 지정해주세요.')
+            raise ValueError('Contrast must be from 0 to 255.')
         if int(values['min_area_pixels']) != values['min_area_pixels'] or not 1 <= values['min_area_pixels'] <= project['width']*values['analysis_bottom']:
-            raise ValueError('최소 면적을 분석 영역 안의 양의 정수로 지정해주세요.')
+            raise ValueError('Minimum area must be a positive integer within the analysis area.')
         if values['points_per_side'] not in [16,32,48,64]:
-            raise ValueError('탐색 밀도를 다시 선택해주세요.')
+            raise ValueError('Select a valid sampling density.')
         for key in ['analysis_bottom','min_area_pixels','points_per_side']: values[key] = int(values[key])
         if payload.get('scale_confirmed') is not True:
-            raise ValueError('스케일바에 적힌 실제 길이를 확인해주세요.')
+            raise ValueError('Confirm the scale length.')
         pre=self.preprocessing(project,payload)
         values.update(preprocessing_mode=pre['mode'],coarse_strength=pre.get('strength','medium'))
         if pre['mode']=='adjustable': values.update({k:v for k,v in pre.items() if k!='mode'})
@@ -173,7 +173,7 @@ class ProjectWorkflow:
         project=self.inspect(project_id)
         bottom=payload.get('analysis_bottom')
         if type(bottom) is not int or not 32<=bottom<=project['height']:
-            raise ValueError('분석 영역 하단을 먼저 확인해주세요.')
+            raise ValueError('Check the bottom boundary.')
         gray=np.asarray(Image.open(self.root/project_id/'input/normalized.png'))[:bottom]
         pixels,meta=prepare_image(gray,self.preprocessing(project,payload))
         buffer=io.BytesIO();Image.fromarray(pixels).save(buffer,format='PNG')
@@ -182,9 +182,9 @@ class ProjectWorkflow:
     def start(self, project_id, payload):
         with self.lock:
             project = self.projects.get(project_id)
-            if project is None: raise ValueError('먼저 이미지를 선택해주세요.')
+            if project is None: raise ValueError('Choose an image first.')
             config = self.validate_config(project, payload)
-            if self.running: raise ValueError('진행 중인 분석이 완료된 뒤 실행해주세요.')
+            if self.running: raise ValueError('Wait for the current analysis to finish.')
             folder = self.root/project_id/'runs'
             number = max([int(p.name.split('_')[-1]) for p in folder.glob('run_*') if p.is_dir()], default=0)+1
             run_id = f'run_{number:04d}'
@@ -192,13 +192,13 @@ class ProjectWorkflow:
             job_id = secrets.token_hex(12)
             self.running = True
             self.jobs[job_id] = dict(id=job_id, project_id=project_id, status='running', progress=1,
-                                     message='분석을 준비하고 있습니다.')
+                                     message='Preparing analysis…')
             threading.Thread(target=self.run, args=(job_id, copy.deepcopy(project), config, run_id, number), daemon=True).start()
             return dict(job_id=job_id)
 
     def status(self, job_id):
         with self.lock:
-            if job_id not in self.jobs: raise ValueError('분석 작업을 찾을 수 없습니다. 저장된 결과 목록을 확인해주세요.')
+            if job_id not in self.jobs: raise ValueError('Analysis job not found. Check saved analyses.')
             return copy.deepcopy(self.jobs[job_id])
 
     def progress(self, job_id, percent, message):
@@ -234,21 +234,21 @@ class ProjectWorkflow:
                         cached = candidate
                         break
                 if cached:
-                    self.progress(job_id,15,'저장된 SAM 영역에 새 조건을 적용하고 있습니다.')
+                    self.progress(job_id,15,'Filtering cached masks…')
                     metadata = json.loads(read_artifact(cached,'raw_metadata.json').read_text())
                     with np.load(read_artifact(cached,'raw_masks.npz'),allow_pickle=False) as data:
                         raw = [dict(item,segmentation=data[f'mask_{i}'].copy()) for i,item in enumerate(metadata)]
                 else:
-                    self.progress(job_id,5,f'SAM 모델을 준비하고 있습니다. ({device.upper()})')
+                    self.progress(job_id,5,f'Loading SAM ({device.upper()})')
                     with inference_context(device):
                         model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device=device,apply_postprocessing=False)
                         generator = ProgressGenerator(model,**settings)
-                        generator.progress_callback = lambda n:self.progress(job_id,min(80,10+int(70*n/math.ceil(settings['points_per_side']**2/8))),'이미지에서 pore 후보 영역을 찾고 있습니다.')
+                        generator.progress_callback = lambda n:self.progress(job_id,min(80,10+int(70*n/math.ceil(settings['points_per_side']**2/8))),'Detecting pores…')
                         raw = generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
                     del generator,model
                     release_device_cache(device)
                     metadata = [{k:v for k,v in item.items() if k!='segmentation'} for item in raw]
-                self.progress(job_id,82,'밝기 차이·크기·포함 관계로 후보를 고르고 있습니다.')
+                self.progress(job_id,82,'Filtering pores…')
                 selected = candidates_from_masks(raw,sam_gray,config['min_contrast'],config['min_area_pixels'])
                 write_artifact(folder,'raw_metadata.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8')
                 np.savez_compressed(write_artifact(folder,'raw_masks.npz'),**{f'mask_{i}':item['segmentation'] for i,item in enumerate(raw)})
@@ -268,7 +268,7 @@ class ProjectWorkflow:
                               selection=f"largest component >=90%; area {config['min_area_pixels']}px..20%; ring contrast >={config['min_contrast']}; fill enclosed holes; suppress >80% containment",
                               candidates=[{k:v for k,v in item.items() if k!='mask'} for item in selected])
                 (folder/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-                self.progress(job_id,90,'분석 마스크를 저장하고 있습니다. 보고서는 편집 완료 후 생성하세요.')
+                self.progress(job_id,90,'Saving masks…')
                 overlay(gray,[a['segmentation'] for a in raw]).save(write_artifact(folder,'raw_sam_overlay.png'))
             dataset = project['id']+'__'+run_id
             with self.lock:
@@ -276,10 +276,10 @@ class ProjectWorkflow:
                 current['config'] = config
                 current['runs'].append(dict(id=run_id,number=number,dataset=dataset,config=config))
                 self.persist(current)
-                self.jobs[job_id].update(status='complete',progress=100,message='분석을 완료했습니다.',dataset=dataset,candidate_count=len(masks))
+                self.jobs[job_id].update(status='complete',progress=100,message='Analysis complete.',dataset=dataset,candidate_count=len(masks))
                 self.running=False
         except Exception as exc:
             (folder/'error.txt').write_text(traceback.format_exc(),encoding='utf-8')
             with self.lock:
-                self.jobs[job_id].update(status='failed',message=f'분석 실패: {exc}')
+                self.jobs[job_id].update(status='failed',message=f'Analysis failed: {exc}')
                 self.running=False

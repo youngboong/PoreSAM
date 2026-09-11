@@ -21,7 +21,7 @@
     const fragment=document.createDocumentFragment(),stats=columns.map(([key])=>statistics(rows,key));
     for(const name of ['min','max','mean','std']){
       const row=document.createElement('tr'),heading=document.createElement('th');heading.textContent=name;row.append(heading);
-      stats.forEach(stat=>{const cell=document.createElement('td');cell.textContent=format(stat[name]);cell.title='유효 pore '+stat.n+'개';row.append(cell)});fragment.append(row);
+      stats.forEach(stat=>{const cell=document.createElement('td');cell.textContent=format(stat[name]);cell.title='Valid values: '+stat.n+'';row.append(cell)});fragment.append(row);
     }
     return fragment;
   }
@@ -31,13 +31,13 @@
       const row=document.createElement('tr');row.dataset.id=candidate.candidate_id;row.tabIndex=0;
       row.classList.toggle('selected',highlight.has(candidate.candidate_id));row.setAttribute('aria-selected',String(highlight.has(candidate.candidate_id)));
       const id=document.createElement('td');id.textContent=candidate.candidate_id+(candidate.touches_image_edge?' †':'');
-      id.title=({manual_polygon:'직접 그리기',prompted_sam:'SAM 추가',manual_cut:'절단',automatic:'자동 분석'})[candidate.source]??'사용자 수정';row.append(id);
+      id.title=({manual_polygon:'Manual polygon',prompted_sam:'Prompted SAM',manual_cut:'Cut',automatic:'Automatic'})[candidate.source]??'Manual edit';row.append(id);
       tableMetrics.forEach(([key])=>{const cell=document.createElement('td');cell.textContent=format(candidate[key]);row.append(cell)});
       row.onclick=event=>window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey);
       row.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey)}};
       fragment.append(row);
     }
-    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='선택한 pore가 없습니다.';row.append(cell);fragment.append(row)}
+    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='No pores selected.';row.append(cell);fragment.append(row)}
     $('poreListRows').replaceChildren(fragment);$('poreDetailsStats').replaceChildren(statRows(selectedRows(),tableMetrics));
   }
   function renderTargets(){
@@ -46,13 +46,13 @@
       if(search&&!String(candidate.candidate_id).includes(search))continue;
       const label=document.createElement('label'),check=document.createElement('input');check.type='checkbox';check.value=candidate.candidate_id;check.checked=selectedIds.has(candidate.candidate_id);
       check.onchange=()=>{if(check.checked)selectedIds.add(candidate.candidate_id);else selectedIds.delete(candidate.candidate_id);allSelected=selectedIds.size===data.candidates.length;update()};
-      label.append(check,document.createTextNode('ID '+candidate.candidate_id+(candidate.source==='manual_polygon'?' · 직접 그리기':'')));fragment.append(label);
+      label.append(check,document.createTextNode('ID '+candidate.candidate_id+(candidate.source==='manual_polygon'?' · Manual polygon':'')));fragment.append(label);
     }
     $('detailsTargetOptions').replaceChildren(fragment);
   }
   function update(){
     const rows=selectedRows();$('detailsTargetCount').textContent='('+rows.length+'/'+(data?.candidates.length??0)+')';
-    $('detailsSummary').textContent='선택 '+rows.length+'개 · 전체 공극률(2D) '+format(data?.stats.candidate_union_area_percent)+'%';
+    $('detailsSummary').textContent='Selected: '+rows.length+' · Image area fraction (2D): '+format(data?.stats.candidate_union_area_percent)+'%';
     const highlighted=window.getHighlightedPore?.();if(highlighted!=null&&!selectedIds.has(highlighted))window.clearPoreHighlight?.();
     renderTable();if(view!=='table')drawPlot();
   }
@@ -83,8 +83,8 @@
     const header=document.createElement('tr');header.append(document.createElement('th'));
     columns.forEach(([,label])=>{const th=document.createElement('th');th.textContent=label;header.append(th)});
     $('detailsPlotStats').replaceChildren(header,statRows(plotRows,columns));
-    $('detailsPlotInfo').textContent='표시 '+plotRows.length+'개 / 선택 '+rows.length+'개'+(view==='scatter'?' · 점을 클릭하면 이미지에서 해당 pore를 강조합니다.':' · 막대 위에서 구간과 개수를 확인하세요.');
-    if(!plotRows.length){ctx.fillStyle='white';ctx.fillRect(0,0,plot.width,plot.height);ctx.fillStyle='#64797f';ctx.font='22px sans-serif';ctx.textAlign='center';ctx.fillText('선택한 항목의 유효한 값이 없습니다.',plot.width/2,plot.height/2);lastPlot={type:view,count:0};return;}
+    $('detailsPlotInfo').textContent='Showing '+plotRows.length+' / Selected: '+rows.length+''+(view==='scatter'?'':'');
+    if(!plotRows.length){ctx.fillStyle='white';ctx.fillRect(0,0,plot.width,plot.height);ctx.fillStyle='#64797f';ctx.font='22px sans-serif';ctx.textAlign='center';ctx.fillText('No valid values.',plot.width/2,plot.height/2);lastPlot={type:view,count:0};return;}
     const xRange=extent(plotRows.map(row=>row[xKey]));
     const x=v=>frame.left+(v-xRange[0])/(xRange[1]-xRange[0])*frame.width;
     if(view==='histogram'){
@@ -135,8 +135,8 @@
   handle.onpointerdown=event=>{if(event.target.closest('button'))return;const rect=dialog.getBoundingClientRect();drag={dx:event.clientX-rect.left,dy:event.clientY-rect.top};handle.setPointerCapture(event.pointerId)};
   handle.onpointermove=event=>{if(!drag)return;const left=Math.max(0,Math.min(innerWidth-dialog.offsetWidth,event.clientX-drag.dx)),top=Math.max(0,Math.min(innerHeight-50,event.clientY-drag.dy));dialog.style.left=left+'px';dialog.style.top=top+'px';dialog.style.right='auto';};
   handle.onpointerup=handle.onpointercancel=()=>{drag=null};
-  for(const [corner,label] of [['nw','왼쪽 위'],['ne','오른쪽 위'],['sw','왼쪽 아래'],['se','오른쪽 아래']]){
-    const grip=document.createElement('span');grip.className='details-resize-corner';grip.dataset.corner=corner;grip.title=label+' 모서리를 드래그하여 크기 조절';dialog.append(grip);
+  for(const [corner,label] of [['nw','Top left'],['ne','Top right'],['sw','Bottom left'],['se','Bottom right'],['n','Top'],['s','Bottom'],['w','Left'],['e','Right']]){
+    const grip=document.createElement('span');grip.className=corner.length===2?'details-resize-corner':'details-resize-edge';grip.dataset.corner=corner;grip.title=label+' — drag to resize';dialog.append(grip);
     let resizing=null;
     grip.onpointerdown=event=>{
       if(event.button!==0)return;
@@ -149,8 +149,8 @@
       const {rect,x,y}=resizing,dx=event.clientX-x,dy=event.clientY-y;
       const west=corner.includes('w'),north=corner.includes('n');
       const maxWidth=Math.min(innerWidth-16,west?rect.right:innerWidth-rect.left),maxHeight=Math.min(innerHeight-16,north?rect.bottom:innerHeight-rect.top);
-      const width=Math.max(Math.min(340,maxWidth),Math.min(maxWidth,rect.width+(west?-dx:dx)));
-      const height=Math.max(Math.min(300,maxHeight),Math.min(maxHeight,rect.height+(north?-dy:dy)));
+      const width=corner.includes('w')||corner.includes('e')?Math.max(Math.min(340,maxWidth),Math.min(maxWidth,rect.width+(west?-dx:dx))):rect.width;
+      const height=corner.includes('n')||corner.includes('s')?Math.max(Math.min(300,maxHeight),Math.min(maxHeight,rect.height+(north?-dy:dy))):rect.height;
       Object.assign(dialog.style,{left:(west?rect.right-width:rect.left)+'px',top:(north?rect.bottom-height:rect.top)+'px',right:'auto',width:width+'px',height:height+'px'});
     };
     grip.onpointerup=grip.onpointercancel=event=>{if(resizing?.pointer!==event.pointerId)return;resizing=null;if(grip.hasPointerCapture(event.pointerId))grip.releasePointerCapture(event.pointerId)};
@@ -159,7 +159,7 @@
   window.addEventListener('resize',()=>{if(!dialog.open)return;const rect=dialog.getBoundingClientRect();dialog.style.left=Math.max(0,Math.min(innerWidth-dialog.offsetWidth,rect.left))+'px';dialog.style.top=Math.max(0,Math.min(innerHeight-50,rect.top))+'px';dialog.style.right='auto'});
   const plotPoint=event=>{const r=plot.getBoundingClientRect();return {x:(event.clientX-r.left)*plot.width/r.width,y:(event.clientY-r.top)*plot.height/r.height}};
   function nearest(point){return points.map(item=>({...item,d:Math.hypot(point.x-item.x,point.y-item.y)})).filter(item=>item.d<16).sort((a,b)=>a.d-b.d)[0]}
-  plot.onpointermove=event=>{const point=plotPoint(event);if(view==='scatter'){const match=nearest(point);plot.title=match?'ID '+match.row.candidate_id+' · '+labels[$('detailsXAxis').value]+': '+format(match.row[$('detailsXAxis').value])+' · '+labels[$('detailsYAxis').value]+': '+format(match.row[$('detailsYAxis').value]):'';}else{const match=bars.find(bar=>point.x>=bar.x&&point.x<bar.x+bar.width);plot.title=match?format(match.lo)+' ~ '+format(match.hi)+' · '+match.count+'개':''}};
+  plot.onpointermove=event=>{const point=plotPoint(event);if(view==='scatter'){const match=nearest(point);plot.title=match?'ID '+match.row.candidate_id+' · '+labels[$('detailsXAxis').value]+': '+format(match.row[$('detailsXAxis').value])+' · '+labels[$('detailsYAxis').value]+': '+format(match.row[$('detailsYAxis').value]):'';}else{const match=bars.find(bar=>point.x>=bar.x&&point.x<bar.x+bar.width);plot.title=match?format(match.lo)+' ~ '+format(match.hi)+' · '+match.count+'':''}};
   plot.onclick=event=>{if(view!=='scatter')return;const match=nearest(plotPoint(event));if(match){window.selectPoreFromDetails?.(match.row.candidate_id);drawPlot()}};
   function download(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
   $('downloadDetails').onclick=()=>{
@@ -169,12 +169,12 @@
     const text='\ufeff'+lines.map(row=>row.map(value=>'"'+String(value).replaceAll('"','""')+'"').join(',')).join('\r\n');
     download(new Blob([text],{type:'text/csv;charset=utf-8'}),'pore_details.csv');
   };
-  $('downloadPlot').onclick=()=>work('선택한 데이터로 그래프를 저장합니다.',async()=>{
+  $('downloadPlot').onclick=()=>work('Exporting plot…',async()=>{
     const kind=view,bins=$('detailsBins').value;
     try{
       const result=await api('details-plot',{...payload(),candidate_ids:selectedRows().map(row=>row.candidate_id),kind,x_key:$('detailsXAxis').value,y_key:$('detailsYAxis').value,bins:bins==='auto'?'auto':Number(bins)});
       download(await (await fetch(result.image)).blob(),kind+'.png');
-      $('detailsPlotInfo').textContent=result.count+'개 pore로 그래프를 저장했습니다.';
+      $('detailsPlotInfo').textContent=result.count+' pores exported.';
     }catch(error){$('detailsPlotInfo').textContent=error.message;throw error;}
   });
   // Expose the plotted counts for reproducible export/validation without modifying masks.

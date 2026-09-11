@@ -1,6 +1,7 @@
 """Shape metrics and modeless details/plots, using isolated synthetic masks."""
 import io
 import json
+import re
 import threading
 import time
 from http.server import ThreadingHTTPServer
@@ -40,9 +41,33 @@ def main():
         with sync_playwright() as p:
             browser=p.chromium.launch(executable_path=r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',headless=True)
             page=browser.new_page(viewport=dict(width=1700,height=1100));page.on('pageerror',lambda e:errors.append(str(e)))
-            page.goto(f'http://127.0.0.1:{server.server_port}');page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
+            page.goto(f'http://127.0.0.1:{server.server_port}')
+            assert page.locator('#newImagePane').is_visible() and not page.locator('#savedImagePane').is_visible()
+            assert page.locator('#newImageTab').get_attribute('aria-selected')=='true'
+            page.screenshot(path=str(run/'load.png'))
+            page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
+            assert not re.search('[\uac00-\ud7a3]',page.locator('body').inner_text())
+            for removed in ['report','revision','saveLinks','fill','reload','reuseImage']:
+                assert page.locator('#'+removed).count()==0
+            assert not page.locator('#regionPanel').is_visible()
+            page.screenshot(path=str(run/'editor.png'))
             assert not page.locator('#poreDetailsDialog').is_visible()
             page.locator('#openPoreDetails').click();assert page.locator('#poreDetailsDialog').is_visible()
+            # Every edge and corner resizes in its own axis without moving the opposite edge.
+            for direction in ['n','s','e','w','nw','ne','sw','se']:
+                page.evaluate("Object.assign($('poreDetailsDialog').style,{left:'400px',top:'220px',right:'auto',width:'700px',height:'600px'})")
+                before=page.locator('#poreDetailsDialog').bounding_box()
+                grip=page.locator('[data-corner="'+direction+'"]').bounding_box()
+                x,y=grip['x']+grip['width']/2,grip['y']+grip['height']/2
+                dx=-40 if 'w' in direction else 40 if 'e' in direction else 0
+                dy=-35 if 'n' in direction else 35 if 's' in direction else 0
+                page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+dx,y+dy,steps=5);page.mouse.up()
+                after=page.locator('#poreDetailsDialog').bounding_box()
+                assert abs(after['width']-before['width']-(40 if dx else 0))<2,direction
+                assert abs(after['height']-before['height']-(35 if dy else 0))<2,direction
+                assert abs(after['x']-before['x']-(-40 if 'w' in direction else 0))<2,direction
+                assert abs(after['y']-before['y']-(-35 if 'n' in direction else 0))<2,direction
+            page.evaluate("Object.assign($('poreDetailsDialog').style,{left:'760px',top:'180px',right:'auto',width:'880px',height:'710px'})")
             assert page.locator('#poreListRows tr[data-id]').count()==2
             assert page.locator('#poreTable thead th').count()==6
             assert page.locator('#poreDetailsStats tr').count()==4
@@ -86,6 +111,33 @@ def main():
             assert page.locator('#poreDetailsStats tr').nth(3).locator('td').first.inner_text()=='—'
             page.keyboard.press('Escape');assert not page.locator('#poreDetailsDialog').is_visible()
             page.locator('#openPoreDetails').click();page.locator('[data-panel=analysis]').click();assert not page.locator('#poreDetailsDialog').is_visible()
+            page.locator('[data-panel=load]').click()
+            assert page.locator('#newImagePane').is_visible() and not page.locator('#savedImagePane').is_visible()
+            page.locator('#openAnalysisTab').click();page.reload();page.wait_for_function('!busy')
+            assert page.locator('#newImagePane').is_visible()
+            # Even an already analyzed file enters calibration when imported through New Image.
+            page.locator('#uploadFile').set_input_files(dict(name='shapes.png',mimeType='image/png',buffer=stream.getvalue()))
+            page.wait_for_function("setupProject && !busy && !$('setupPanel').classList.contains('hidden')")
+            assert not page.locator('#scaleConfirmed').is_checked()
+            assert page.locator('#editorPanel').is_hidden()
+            def wait_preview():
+                page.wait_for_function("!previewPending && !previewInFlight && $('preprocessingImage').dataset.generation===String(previewGeneration)")
+            wait_preview()
+            original_preview=page.locator('#preprocessingImage').get_attribute('src')
+            for method in ['gaussian','box','median','bilateral','kuwahara','none']:
+                page.locator('#blurMethod').select_option(method);wait_preview()
+                assert page.locator('#blurStrengthField').is_visible()==(method!='none')
+                assert not re.search('[\uac00-\ud7a3]',page.locator('body').inner_text())
+            page.locator('#normalizeEnabled').uncheck();wait_preview()
+            page.locator('#backgroundStrength').fill('4');wait_preview()
+            assert page.locator('#preprocessingImage').get_attribute('src')!=original_preview
+            page.screenshot(path=str(run/'preprocess.png'))
+            page.locator('#scaleUm').fill('50');page.locator('#scalePixels').fill('100')
+            page.locator('#runAnalysis').click()
+            assert 'Confirm calibration' in page.locator('#jobStatus').inner_text()
+            assert not editor.workflow.running
+            page.set_viewport_size(dict(width=1100,height=800))
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             page.wait_for_load_state('networkidle');assert not errors,errors;browser.close()
         (run/'result.json').write_text(json.dumps(dict(passed=True,metric_invariants=True,summary_stats=True,histogram_counts=True,scatter_selection=True,manual_updates=True,csv_export=True,browser_errors=errors),indent=2))
         print(run,flush=True)

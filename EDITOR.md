@@ -1,114 +1,75 @@
-# Pore Editor
+# PoreSAM Editor
 
-**1. 불러오기 → 2. 전처리 → 3. 결과 분석 → 4. 결과 보고서** 순서로 사용합니다.
+English UI on the `english` branch. The Korean edition remains on `korean`.
 
-- **불러오기**: 새 이미지와 저장된 분석을 선택합니다. 새 이미지는 전처리로, 저장된 분석은 결과 분석으로 이동합니다.
-- **전처리**: 스케일·분석 영역과 전처리 설정을 조절하고 자동 분석을 실행합니다.
-- **결과 분석**: 자동 분석 완료 후 pore를 확인하고 추가·절단·대체·삭제합니다.
-- **결과 보고서**: 편집을 마친 뒤 **결과 보고서 생성**을 눌러 현재 수정본의 이미지·측정 CSV·그래프·PDF를 만듭니다. 생성된 파일을 확인하고 내려받습니다.
+## Run
 
-## 실행
-
-프로젝트 폴더에서 실행합니다.
+From the project directory:
 
 ```powershell
 conda activate pore
-python scripts/pore_editor.py
+python scripts/pore_editor.py --device cpu
 ```
 
-브라우저에서 http://127.0.0.1:8765 를 엽니다. 서버 종료는 실행한 터미널에서 Ctrl+C입니다.
+Open http://127.0.0.1:8765. Stop the server with Ctrl+C. Use `--port 8766` if the default port is occupied. Omitting `--device cpu` selects CUDA when available and CPU otherwise. See [SETUP.md](SETUP.md) for environment installation.
 
-기본값인 `--device auto`는 CUDA GPU가 있으면 GPU를, 없으면 CPU를 사용합니다. CPU로 실행하려면 `python scripts/pore_editor.py --device cpu`를 사용하세요. 시작 로그에 실제 장치가 표시됩니다. CPU는 float32로 계산하며, 같은 이미지의 수동 SAM 보완에서는 이미지 특징을 재사용합니다. 전체 자동 분석은 CPU 성능과 탐색 정도에 따라 시간이 더 걸릴 수 있습니다. 설치 방법은 [SETUP.md](SETUP.md)를 참고하세요.
+## Workflow
 
-## 이미지와 전처리 설정
+1. **Load Image** always opens **New Image**. Import TIF, PNG or JPG (up to 32 MB). Importing an already analyzed file also opens preprocessing; use **Open Analysis** to resume its saved masks.
+2. **Preprocess**: confirm the analysis region and calibration. Measure both ends of the scale bar, enter its physical length, then check **Confirm calibration**. Adjust processing while comparing the original and live preview. **Run Analysis** starts automatic segmentation.
+3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**.
+4. **Report**: choose a destination with **Browse…**, then **Generate & Export**. Each export creates a separate folder containing the original file, segmentation and comparison images, measurements, PDF and HTML reports.
 
-자동 분석은 분석 영역 면적의 20% 이하인 후보를 면적 상한 조건에서 통과시킵니다. 밝기 차이·최소 면적·포함 관계 조건은 별도로 적용됩니다. 이 상한은 박스·타원형·다각형으로 직접 추가하는 pore에는 적용하지 않습니다.
+## Processing
 
-1. TIF, PNG, JPG 이미지를 선택합니다. 이미 분석한 원본 파일이면 저장된 분석을 Pore Editor에서 이어서 엽니다.
-2. 분석 영역 하단과 스케일바 길이를 확인합니다. 원본에서 스케일바 양 끝을 클릭하거나 픽셀 길이를 직접 입력하고, 실제 길이(µm)를 입력합니다.
-3. 전처리 설정을 조절하면서 원본 옆의 **실시간 전처리 미리보기**를 확인합니다. 별도의 미리보기 버튼은 없습니다.
-4. 분석 시작을 누릅니다. 밝기 차이, 최소 면적, 탐색 정도는 고급 설정에서 조절합니다.
-
-| 설정 | 동작 |
+| Setting | Function |
 |---|---|
-| 밝기 정규화 | 켜기/끄기. 분석 영역의 2~98 백분위수로 밝기 범위를 조정 |
-| Background 제거 강도 | 0~30. 0은 끄기. 반경에 따른 grayscale opening으로 가는 밝은 구조 약화 |
-| Blur 방식 | 사용 안 함, Gaussian, 평균, Median, Bilateral, Kuwahara |
-| 필터 강도 | 0~10. 필터를 선택하면 표시. 0은 해당 필터 끄기 |
+| Brightness normalization | Normalize the 2nd–98th intensity percentiles |
+| Background removal | Suppress thin bright structures; strength 0 turns it off |
+| Smoothing filter | None, Gaussian, Mean, Median, Bilateral or Kuwahara |
+| Strength | Shown when a smoothing filter is enabled |
+| Detection Settings | Minimum contrast, minimum area and sampling density |
 
-정규화 → background 제거 → 필터 순서로 처리합니다. Background 제거는 실제 깊이를 판별하지 않습니다. 강도를 올리면 유지할 pore 경계도 바뀔 수 있으므로 미리보기로 판단합니다.
+Processing order is normalization → background removal → smoothing. These operations use image intensity, not physical depth. Automatic candidates may occupy up to 20% of the analysis region; contrast, minimum area and containment filters also apply. Manual additions do not use that area ceiling.
 
-새 이미지 기본값은 정규화 켜짐, background 제거 0, blur 사용 안 함입니다.
-16bit 등 8bit가 아닌 입력은 원본을 보존하고 표시·분석용으로 최솟값~최댓값을 0~255로 변환합니다. 이 형식 변환과 선택 가능한 밝기 정규화는 별개입니다.
+## Editing
 
-미리보기는 120ms 동안 입력을 모아 갱신하고, 처리 중에도 설정을 바꿀 수 있습니다. 늦게 도착한 이전 응답은 표시하지 않습니다. 전체 분석 해상도에서 처리하므로 큰 이미지와 무거운 필터는 시간이 걸릴 수 있습니다.
-미리보기와 실제 분석은 동일한 전처리 함수를 사용합니다. 실제 입력은 분석 폴더의 `images/analysis_input.png`, 설정은 `report.json`에 저장됩니다. 이후 수동 SAM 분할도 해당 입력을 사용합니다.
+| Tool or shortcut | Action |
+|---|---|
+| Select | Click a pore to select it |
+| Ctrl+click | Add or remove a pore from the selection |
+| Select Boundary Pores | Select all pores touching the image boundary |
+| Delete | Delete selected pores in one edit |
+| Box / Ellipse | Drag a region, then preview SAM segmentation |
+| Include + / Exclude − | Refine SAM with points |
+| Polygon | Click vertices, preview, then add the drawn mask |
+| Cut | Drag through a pore and apply a cut, 1–30 px wide |
+| Undo Input / Clear Input | Undo the last drawing input or clear the current drawing |
+| Ctrl+Z / Undo | Undo drawing inputs first, then the last saved edit |
 
-## 큰 pore를 직접 추가하기
+Pore selection is disabled while drawing. Preview masks are applied only when **Add Pore** or **Replace Pore(s)** is clicked. Contained existing pores are replaced when at least 95% of their area lies within a larger new mask. Partial overlaps must be trimmed or resolved before applying.
 
-**Ctrl+클릭**은 pore를 현재 선택에 추가하거나 이미 선택된 pore를 제외합니다. 일반 클릭은 한 개만 선택합니다. **경계 pore 전체 선택**을 누르면 분석 영역의 위·아래·좌·우 경계에 닿는 pore가 모두 선택됩니다. 남길 pore를 Ctrl+클릭으로 제외한 다음 **Delete**를 누르면 선택된 pore만 한 번에 삭제됩니다. 선택만으로는 삭제하지 않으며, 이 일괄 삭제는 **Ctrl+Z 한 번**으로 복원합니다. **선택 해제**로 전체 선택을 취소할 수 있습니다.
+Cut removes mask pixels along the path. Disconnected pieces become separate pores; the largest retains the original ID. Multi-delete is undone as one operation.
 
-기본 **pore 선택** 도구에서 오른쪽 이미지의 pore를 클릭하면 강조됩니다. **Delete** 키 또는 **선택 후보 삭제** 버튼으로 삭제하며, 마스크와 수정 이력은 즉시 저장됩니다. 화면의 목록·통계도 갱신됩니다. **Ctrl+Z**로 복원할 수 있습니다. 빈 영역을 클릭하면 선택이 해제됩니다. 박스·타원형·다각형·포함/제외 점·절단 도구에서는 이미지 클릭 선택과 Delete 단축키가 비활성화됩니다. 선택으로 돌아오려면 **pore 선택**을 누르세요. 검색창 등 텍스트 입력 중에는 Delete가 pore를 삭제하지 않습니다.
+## Pore Details
 
-편집할 때마다 보고서를 만들지는 않습니다. 별도 분석 완료 버튼 없이 **4. 결과 보고서**에서 **저장 폴더**를 입력하거나 **폴더 선택…**으로 지정하고 **보고서 생성 및 저장**을 누르세요. 지정한 폴더 안에 이름·수정본·시간이 포함된 새 결과 폴더를 만듭니다. 같은 위치에 다시 저장해도 기존 결과는 덮어쓰지 않습니다.
+The modeless window stays open while editing. Drag its title bar to move it, or any corner or edge to resize. Escape closes it. New manual pores appear in the list automatically.
 
-- `original/`: 업로드한 원본 파일 그대로 보존(TIFF 메타데이터·비트 깊이 포함)
-- `images/`: 분석 영역 이미지, pore 표시 이미지, 비교 이미지, 마스크 및 전처리 입력(있는 경우)
-- `measurements/`: 측정 CSV, 요약 JSON, 분포 그래프, PDF·HTML 보고서
-- `index.html`: 저장 결과의 보고서 열기
+- **Details**: ID, length, width, aspect ratio, equivalent diameter and roundness; min, max, mean and sample standard deviation below the table.
+- **Pores** dropdown: filter the table and plots by ID.
+- **Histogram**: select a measurement and bin count.
+- **Scatter Plot**: select X and Y measurements. All points use one color. Clicking a point highlights its pore on the image.
+- **Export CSV / Export Plot**: save the filtered table or plot.
 
-현재 수정본 폴더에도 보고서를 생성해 앱에서 표시합니다. 이후 다시 편집하면 새 수정본은 보고서 미생성 상태가 됩니다. 이전 수정본의 보고서는 보존됩니다. Pore details의 화면 통계와 명시적인 CSV·그래프 내보내기는 계속 사용할 수 있습니다.
+Measurement formulas are available in the collapsed **Measurement Definitions** section. Shape metrics describe the 2D mask. Boundary pores contribute to total count and area fraction, but are excluded from the main size distributions.
 
-결과 분석 화면은 왼쪽 원본과 오른쪽 분석 결과를 나란히 표시합니다. 확대와 스크롤은 양쪽에 함께 적용하고, 오른쪽에서 pore를 편집합니다. **화면에 맞추기**로 전체 이미지를 볼 수 있습니다.
+## Saving
 
-pore는 기본 노란색으로 내부를 40% 진하게 채웁니다. **pore 색상**, **채우기 진하기**, **번호 표시**를 바꾸면 즉시 반영됩니다. 색상·진하기는 브라우저에 저장합니다. 이 표시 설정은 마스크·측정값·저장된 보고서를 변경하지 않습니다.
+Editing saves mask revisions and updates on-screen measurements without generating reports. Report generation happens only in step 4.
 
-**Pore details**를 누르면 팝업이 열립니다. 제목 표시줄을 드래그하면 이동하고, 네 모서리 어디에서든 드래그하면 크기를 조절할 수 있습니다. 팝업은 이미지 편집을 막지 않으며, 닫기 버튼이나 Esc로 닫습니다. 다른 작업 단계로 이동하면 닫힙니다.
+- Original uploads: `outputs/projects/<image ID>/input/`
+- Automatic masks: `outputs/projects/<image ID>/runs/run_XXXX/`
+- Manual revisions: `outputs/manual_edits/<analysis ID>/revision_XXXX/`
+- Export: a unique folder under the chosen destination with `original/`, `images/`, and `measurements/`
 
-- **Details**: ID, Length (µm), Width (µm), Aspect ratio, Equivalent diameter (µm), Roundness를 표시합니다. 표 하단에 선택한 pore의 min·max·mean·std가 있습니다.
-- **Histogram**: 드롭다운에서 측정 항목과 구간 수를 고릅니다. 막대 위에서 구간과 개수를 확인합니다.
-- **Scatter plot**: X축·Y축 항목을 각각 고릅니다. 점에 마우스를 올리면 ID와 값이 표시되고 클릭하면 해당 pore를 강조합니다.
-- **대상 pore 선택**: 체크 목록과 ID 검색으로 표·그래프에 포함할 pore를 선택합니다. 전체 선택이 기본값이며 새로 추가·절단한 pore도 자동 포함됩니다. 일부만 선택한 상태에서는 그 선택을 유지합니다.
-- **CSV 저장**: 현재 선택한 pore와 min·max·mean·std를 저장합니다. **그래프 저장**은 동일한 측정값을 Matplotlib으로 그린 PNG를 내려받습니다.
-
-표의 행을 클릭하거나 Enter를 누르면 해당 pore를 대비색으로 강조합니다. 강조는 교체 대상을 자동 변경하지 않습니다. 직접 그리기·SAM 추가·절단·대체·삭제·실행 취소 후 열린 팝업의 목록과 수치도 갱신됩니다. 전체 공극률은 전체 pore 합집합 면적 / 분석 이미지 면적의 2D 비율이며 부분 선택에 따라 바뀌지 않습니다.
-
-Length·Width는 동일한 2차 모멘트를 갖는 타원의 장축·단축 길이이며, 바운딩 박스나 Feret 직경이 아닙니다. Aspect ratio는 Length / Width, Roundness는 4 × 면적 / (π × Length²)입니다. 이전에 추가한 Circularity(4π × 면적 / 둘레²)와는 다른 지표이며, 그래프 항목과 CSV에 별도로 남습니다. Roundness와 Circularity는 픽셀 근사로 1을 초과하면 1로 표시하고 원래 값도 CSV의 `_raw` 열에 기록합니다. 실제 3D 구형도는 측정하지 않습니다.
-
-Std는 표본 표준편차(n−1)입니다. 유효 값이 2개 미만이면 —로 표시하고, 폭·길이가 0이어서 정의할 수 없는 비율은 해당 통계·그래프에서 제외합니다. † 표시된 pore는 이미지 경계에서 잘려 보이는 부분만 측정합니다. 팝업 통계에는 선택한 모든 pore가 포함되고, 기존 보고서의 `complete_*` 요약은 이미지 경계 접촉 pore를 제외합니다.
-
-측정 정의 참고: [ImageJ 형태 지표](https://imagej.net/ij/docs/guide/146-30.html), [scikit-image 타원 장·단축 정의](https://scikit-image.org/docs/stable/api/skimage.measure.html).
-
-큰 pore 별도 자동 탐색 UI는 제거했습니다.
-
-- **박스 / 타원형**: pore를 둘러싸도록 드래그하고 SAM 분할 미리보기를 실행합니다. 포함(+)·제외(−) 점으로 보완할 수 있습니다.
-- **직접 그리기**: 외곽을 차례로 클릭하여 다각형을 그리고, 미리보기 후 적용합니다.
-- 새 영역에 기존 작은 pore 면적의 95% 이상이 포함되면 해당 pore를 대체합니다. 대체 대상 외의 pore와 일부 겹치는 경우 저장을 차단합니다.
-- 저장이 막히면 이유와 pore 번호를 표시합니다. **다른 pore와 겹친 부분 제외**를 누르면 이웃 pore를 유지하면서 새 후보에서 공유 픽셀만 제외합니다. 바뀐 미리보기를 확인하고 대체 및 저장을 누릅니다. 제외 후 여러 조각으로 분리되면 각 조각을 별도 후보로 제시합니다.
-
-## pore 내부를 잘라 나누기
-
-1. **pore 자르기**를 선택하고 절단 폭(1~30px)을 조절합니다.
-2. pore 내부를 가로지르도록 드래그합니다. 붉은 경로가 절단 위치입니다. 곡선으로도 그릴 수 있습니다.
-3. **절단 적용 및 저장**을 누릅니다.
-
-경로에 닿는 pore 마스크만 잘립니다. 원본 이미지는 그대로입니다. 절단 후 떨어진 조각은 각각 별도 pore가 됩니다. 가장 큰 조각은 기존 번호를 유지하고 나머지는 새 번호를 받습니다. 경로가 pore를 완전히 가르지 않으면 하나의 pore로 남습니다. 모든 픽셀이 제거된 pore는 삭제됩니다.
-
-절단 폭만큼 마스크 면적이 감소합니다. 변경된 개수·면적·직경·공간 분포는 저장 시 다시 계산합니다. 미리보기 경로 지정은 입력 취소로, 저장한 절단은 실행 취소로 되돌릴 수 있습니다. **Ctrl+Z**는 미저장 입력부터 취소하고, 입력이 없으면 직전 저장 상태를 정확히 복원합니다.
-
-## 저장
-
-- 업로드 원본: `outputs/projects/<이미지 ID>/input/`
-- 자동 분석: `outputs/projects/<이미지 ID>/runs/run_XXXX/`
-- 사용자 수정: `outputs/manual_edits/<분석 ID>/revision_XXXX/`
-- 각 결과의 `images/`에 수정 이미지, `measurements/`에 CSV·JSON·HTML·PDF 통계
-- 최신 수정본 포인터: `latest.json`. 이전 수정본은 덮어쓰지 않습니다.
-
-면적률은 2D 영상의 pore 마스크 합집합 비율입니다. 직경은 면적에서 계산한 등가 원 직경입니다. 이미지 경계에 닿는 pore는 전체 개수·면적에 포함하고 크기 분포에서는 제외합니다.
-
-2026-09-11 사용자 요청으로 기존 first pass, 수정본, 실험 및 추가 탐색 결과와 프로젝트 분석 runs를 삭제했습니다. 원본·업로드 파일과 환경 기록은 보존했습니다. 삭제 내역과 보존 파일 해시는 `outputs/analysis_reset.json`에 있습니다. 삭제된 run 참조는 앱이 불러올 때 제외합니다. 새 UI 검증 결과는 `outputs/ui_checks/`에 별도 보관합니다.
-
-## 필터 구현 참고
-
-Gaussian·평균·Median·Bilateral은 [OpenCV 공식 문서](https://docs.opencv.org/4.10.0/dc/dd3/tutorial_gausian_median_blur_bilateral_filter.html)의 필터를 사용합니다.
-Kuwahara는 네 사분영역 중 분산이 가장 작은 영역의 평균을 선택하는 기본형입니다. 이방성 확장형은 아닙니다. [Kyprianidis 등의 논문](https://www.kyprianidis.com/p/pg2009/jkyprian-pg2009.pdf)을 참고했습니다.
+Older reports are regenerated in English on explicit report generation. Existing masks and measurement formulas are unchanged by the UI language. English and Korean branches share local data paths when run from the same checkout.

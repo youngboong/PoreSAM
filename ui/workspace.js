@@ -8,24 +8,31 @@ function showPanel(name){
   document.querySelectorAll('.steps [data-panel]').forEach(b=>{b.classList.toggle('active',b.dataset.panel===name);if(b.dataset.panel===name)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current')});
   if(name==='editor'){draw();window.onComparisonVisible?.()}
   else window.closePoreDetails?.();
+  if(name==='load')setLoadMode('new');
   window.scrollTo(0,0);
 }
 window.updateWorkspaceControls=()=>{document.querySelector('[data-panel="setup"]').disabled=busy||(!setupProject&&!state)};
 document.querySelectorAll('[data-panel]').forEach(button=>button.onclick=()=>{
-  if(button.dataset.panel==='setup'&&!setupProject&&state)return workspaceWork('현재 이미지의 전처리 설정을 불러옵니다.',()=>prepareExisting(state.dataset));
+  if(button.dataset.panel==='setup'&&!setupProject&&state)return workspaceWork('Loading settings…',()=>prepareExisting(state.dataset));
   showPanel(button.dataset.panel);
 });
+function setLoadMode(mode){
+  const fresh=mode==='new';
+  $('newImagePane').classList.toggle('hidden',!fresh);$('savedImagePane').classList.toggle('hidden',fresh);
+  for(const [id,active] of [['newImageTab',fresh],['openAnalysisTab',!fresh]]){$(id).classList.toggle('active',active);$(id).setAttribute('aria-selected',String(active))}
+}
+$('newImageTab').onclick=()=>setLoadMode('new');$('openAnalysisTab').onclick=()=>setLoadMode('saved');
 function jobMessage(message,error=false){$('jobStatus').textContent=message;$('jobStatus').classList.toggle('error',error);$('imageSelectionStatus').textContent=message;$('imageSelectionStatus').classList.toggle('error',error)}
 async function workspaceWork(message,fn){
   await work(message,async()=>{jobMessage(message);try{await fn()}catch(error){jobMessage(error.message,true);throw error}});
 }
 async function readImageLibrary(){
   const response=await fetch('/api/images');
-  if(!response.ok)throw new Error('이미지 목록을 불러오지 못했습니다. 다시 불러오기를 눌러주세요. (HTTP '+response.status+')');
+  if(!response.ok)throw new Error('Could not load images. Retry. (HTTP '+response.status+')');
   let data;
-  try{data=await response.json()}catch{throw new Error('이미지 목록 응답을 읽지 못했습니다. 다시 불러오기를 눌러주세요.')}
+  try{data=await response.json()}catch{throw new Error('Could not read image list. Retry.')}
   if(!Array.isArray(data?.images)||!data.images.every(entry=>entry&&typeof entry.id==='string'&&typeof entry.name==='string'&&typeof entry.preview_url==='string'&&Array.isArray(entry.analyses)&&entry.analyses.every(a=>a&&typeof a.dataset==='string')))
-    throw new Error('이미지 목록 응답이 올바르지 않습니다. 화면을 새로고침하거나 목록을 다시 불러와주세요.');
+    throw new Error('Invalid image list. Refresh and retry.');
   return data.images;
 }
 function libraryFailed(error){$('libraryStatus').textContent=error.message;$('retryLibrary').classList.remove('hidden')}
@@ -36,11 +43,11 @@ async function refreshLists(){
     datasetLabels=datasets.labels??{};acceptLibrary(entries);
   }catch(error){libraryFailed(error);throw error}
 }
-$('retryLibrary').onclick=()=>workspaceWork('이미지 목록을 다시 불러오고 있습니다.',async()=>{await refreshLists();jobMessage('이미지 목록을 불러왔습니다.')});
+$('retryLibrary').onclick=()=>workspaceWork('Loading images…',async()=>{await refreshLists();jobMessage('Images loaded.')});
 function updateHistory(selected){
   const entry=imageLibrary.find(e=>e.analyses.some(a=>a.dataset===selected));
   $('dataset').replaceChildren();
-  if(entry)entry.analyses.forEach(a=>$('dataset').add(new Option(entry.name+' · '+a.label+(a.revision?' · 수정본 '+a.revision:''),a.dataset)));
+  if(entry)entry.analyses.forEach(a=>$('dataset').add(new Option(entry.name+' · '+a.label+(a.revision?' · Revision '+a.revision:''),a.dataset)));
   else if(selected)$('dataset').add(new Option(datasetLabels[selected]??selected,selected));
   $('dataset').value=selected;
 }
@@ -50,13 +57,13 @@ function renderImageLibrary(){
     const card=document.createElement('button');card.className='image-card';card.dataset.imageId=entry.id;card.dataset.analyzed=String(entry.analyzed);
     const thumbnail=document.createElement('img');thumbnail.src=entry.preview_url;thumbnail.alt='';thumbnail.loading='lazy';
     const name=document.createElement('strong');name.textContent=entry.name;
-    const detail=document.createElement('span');detail.className='hint';detail.textContent=entry.analyzed?'분석 '+entry.analysis_count+'개'+(entry.revision?' · 수정본 '+entry.revision:'')+' · 결과 분석에서 열기':'분석 영역과 스케일 설정하기';
-    const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'분석된 이미지 불러오기 →':'전처리 이어가기 →';
-    card.append(thumbnail,name,detail,action);card.onclick=()=>workspaceWork('이미지를 불러오고 있습니다.',async()=>selectImage(await api('open-image',{image_id:entry.id})));
+    const detail=document.createElement('span');detail.className='hint';detail.textContent=entry.analyzed?'Saved analysis':'Ready to preprocess';
+    const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'Open Analysis →':'Preprocess →';
+    card.append(thumbnail,name,detail,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
     $(entry.analyzed?'imageLibrary':'pendingImages').append(card);
   }
   $('pendingImagesSection').classList.toggle('hidden',!$('pendingImages').children.length);
-  if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='분석한 이미지가 여기에 표시됩니다.';$('imageLibrary').append(message)}
+  if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='No saved analyses.';$('imageLibrary').append(message)}
   controls();
 }
 async function selectImage(selection){
@@ -64,11 +71,11 @@ async function selectImage(selection){
     previewGeneration++;previewPending=false;setupProject=null;setupImage=null;$('newAnalysisSettings').classList.add('hidden');
     await refreshLists();updateHistory(selection.dataset);
     await accept(await api('load',{dataset:selection.dataset}));showPanel('editor');
-    jobMessage('저장된 분석과 최신 수정본을 불러왔습니다.');setStatus('저장된 분석을 이어서 수정할 수 있습니다.');
+    jobMessage('Analysis loaded.');setStatus('Ready');
   }else{
     state=null;base=null;outlines=null;clear();
     await showProject(selection.project);
-    jobMessage(selection.existing?'아직 분석하지 않은 이미지입니다. 설정을 확인해주세요.':'새 이미지입니다. 분석 영역과 스케일을 설정해주세요.');
+    jobMessage(selection.existing?'Check calibration.':'Check calibration.');
   }
 }
 function drawSetup(){
@@ -87,15 +94,15 @@ function drawSetup(){
 function updateCalibration(){
   const um=Number($('scaleUm').value),px=Number($('scalePixels').value),minimum=Number($('minArea').value);
   const valid=um>0&&px>0;
-  $('calibrationInfo').textContent=valid?'1px = '+(um/px).toPrecision(5)+' µm · 분석 면적 '+(setupProject.width*Number($('analysisBottom').value)*(um/px)**2).toLocaleString(undefined,{maximumFractionDigits:1})+' µm²':'실제 길이와 픽셀 길이를 입력하세요.';
-  $('minAreaInfo').textContent=valid?'현재 스케일에서 '+(minimum*(um/px)**2).toFixed(3)+' µm² 이상인 후보를 선택합니다.':'기본값 100px. 스케일에 따라 실제 최소 면적이 달라집니다.';
+  $('calibrationInfo').textContent=valid?'1px = '+(um/px).toPrecision(5)+' µm · Image area '+(setupProject.width*Number($('analysisBottom').value)*(um/px)**2).toLocaleString(undefined,{maximumFractionDigits:1})+' µm²':'Enter scale lengths.';
+  $('minAreaInfo').textContent=valid?'Minimum: '+(minimum*(um/px)**2).toFixed(3)+' µm²':'';
 }
 async function showProject(project){
   $('advancedSettings').open=false;$('regionSettings').open=false;
   setupProject=project;scalePoints=[];measuringScale=false;$('measureScale').classList.remove('active');
   setupImage=await image(project.preview_url);setupCanvas.width=project.width;setupCanvas.height=project.height;
   $('setupImageTitle').textContent=project.name;
-  $('imageDetails').textContent=project.width+' × '+project.height+'px · '+project.original_dtype+(project.normalization?' · 밝기 범위를 0~255로 변환해 분석합니다.':'');
+  $('imageDetails').textContent=project.width+' × '+project.height+'px · '+project.original_dtype+(project.normalization?' · 8-bit preview':'');
   $('analysisBottom').max=project.height;$('bottomSlider').max=project.height;
   const c=project.config;
   $('analysisBottom').value=$('bottomSlider').value=c.analysis_bottom;
@@ -107,31 +114,31 @@ async function showProject(project){
   updateSettingsSummary();
   if(project.scale_detection){const s=project.scale_detection;scalePoints=[[s.x,s.y],[s.x+s.length_pixels,s.y]]}
   updateCalibration();drawSetup();await refreshLists();$('newAnalysisSettings').classList.remove('hidden');showPanel('setup');
-  jobMessage('분석 영역과 스케일바 실제 길이를 확인한 뒤 실행하세요.');
+  jobMessage('Confirm calibration to continue.');
 }
-$('uploadFile').onchange=()=>workspaceWork('이미지를 불러오고 있습니다.',async()=>{
+$('uploadFile').onchange=()=>workspaceWork('Loading image…',async()=>{
   const file=$('uploadFile').files[0];if(!file)return;
-  if(file.size>32*1024*1024)throw new Error('32MB 이하의 이미지 파일을 선택해주세요.');
-  const content=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('파일을 읽을 수 없습니다.'));reader.readAsDataURL(file)});
-  await selectImage(await api('upload',{name:file.name,content}));$('uploadFile').value='';
+  if(file.size>32*1024*1024)throw new Error('Choose an image up to 32 MB.');
+  const content=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(new Error('Cannot read file.'));reader.readAsDataURL(file)});
+  const selection=await api('upload',{name:file.name,content});
+  if(selection.dataset){state=null;base=null;outlines=null;clear();await prepareExisting(selection.dataset)}else await selectImage(selection);$('uploadFile').value='';
 });
 async function prepareExisting(dataset){await showProject(await api('import-existing',{dataset}))}
-$('reuseImage').onclick=()=>workspaceWork('기존 이미지로 새 분석을 준비하고 있습니다.',()=>prepareExisting(state.dataset));
 for(const id of ['analysisBottom','bottomSlider'])$(id).oninput=()=>{if(!setupProject)return;const value=$(id).value;$('analysisBottom').value=$('bottomSlider').value=value;updateCalibration();drawSetup();invalidatePreprocessing()};
 for(const id of ['scaleUm','scalePixels','minArea'])$(id).oninput=()=>{if(setupProject)updateCalibration();if(id!=='minArea')$('scaleConfirmed').checked=false};
 $('resetCriteria').onclick=()=>{$('minContrast').value=8;$('minArea').value=100;$('pointDensity').value=48;$('normalizeEnabled').checked=true;$('backgroundStrength').value=0;$('blurMethod').value='none';$('blurStrength').value=2;invalidatePreprocessing();if(setupProject)updateCalibration()};
 function preprocessingPayload(){return {analysis_bottom:Number($('analysisBottom').value),preprocessing_mode:'adjustable',normalize_enabled:$('normalizeEnabled').checked,background_strength:Number($('backgroundStrength').value),blur_method:$('blurMethod').value,blur_strength:Number($('blurStrength').value)}}
 function updateSettingsSummary(){
-  $('analysisSettingsSummary').textContent='밝기 정규화 '+($('normalizeEnabled').checked?'켜짐':'꺼짐')+' · Background '+$('backgroundStrength').value+' · '+$('blurMethod').selectedOptions[0].textContent;
+  $('analysisSettingsSummary').textContent='Normalization '+($('normalizeEnabled').checked?'On':'Off')+' · Background '+$('backgroundStrength').value+' · '+$('blurMethod').selectedOptions[0].textContent;
 }
 for(const id of ['minContrast','minArea','pointDensity'])$(id).addEventListener('input',updateSettingsSummary);
 let previewTimer=null,previewGeneration=0,previewInFlight=false,previewPending=false;
 function invalidatePreprocessing(){
   previewGeneration++;previewPending=true;clearTimeout(previewTimer);
-  $('backgroundValue').textContent=$('backgroundStrength').value==='0'?'0 · 끄기':$('backgroundStrength').value;
+  $('backgroundValue').textContent=$('backgroundStrength').value==='0'?'Off':$('backgroundStrength').value;
   $('blurValue').textContent=$('blurStrength').value;$('blurStrengthField').classList.toggle('hidden',$('blurMethod').value==='none');updateSettingsSummary();
   if(!setupProject)return;
-  $('preprocessingImage').style.opacity='.5';$('preprocessingInfo').textContent='변경한 설정을 적용하는 중…';
+  $('preprocessingImage').style.opacity='.5';$('preprocessingInfo').textContent='Updating…';
   previewTimer=setTimeout(refreshPreprocessing,120);
 }
 async function refreshPreprocessing(){
@@ -144,19 +151,19 @@ async function refreshPreprocessing(){
     if(generation!==previewGeneration||setupProject?.id!==projectId)return;
     $('preprocessingImage').src=ready.src;$('preprocessingImage').style.opacity='1';
     $('preprocessingImage').dataset.generation=String(generation);
-    $('preprocessingInfo').textContent='미리보기 반영 완료 · '+ready.width+' × '+ready.height+'px';
+    $('preprocessingInfo').textContent='Updated · '+ready.width+' × '+ready.height+'px';
   }catch(error){if(generation===previewGeneration)$('preprocessingInfo').textContent=error.message;}
   finally{previewInFlight=false;if(previewPending)refreshPreprocessing();}
 }
 for(const id of ['normalizeEnabled','backgroundStrength','blurMethod','blurStrength'])$(id).addEventListener('input',invalidatePreprocessing);
-$('measureScale').onclick=()=>{if(!setupProject){jobMessage('먼저 이미지를 선택해주세요.',true);return}measuringScale=!measuringScale;scalePoints=[];$('measureScale').classList.toggle('active',measuringScale);drawSetup();jobMessage('스케일바의 양 끝을 차례로 클릭하세요.')};
+$('measureScale').onclick=()=>{if(!setupProject){jobMessage('Choose an image first.',true);return}measuringScale=!measuringScale;scalePoints=[];$('measureScale').classList.toggle('active',measuringScale);drawSetup();jobMessage('Click both ends of the scale bar.')};
 $('clearScaleLine').onclick=()=>{scalePoints=[];measuringScale=false;$('measureScale').classList.remove('active');drawSetup()};
-$('scaleConfirmed').onchange=()=>{if($('scaleConfirmed').checked)jobMessage('설정을 확인한 뒤 자동 분석을 실행하세요.')};
+$('scaleConfirmed').onchange=()=>{if($('scaleConfirmed').checked)jobMessage('Ready to analyze.')};
 setupCanvas.onclick=event=>{
   if(busy||!setupProject||!measuringScale)return;
   const r=setupCanvas.getBoundingClientRect(),x=Math.max(0,Math.min(setupCanvas.width-1,(event.clientX-r.left)*setupCanvas.width/r.width)),y=Math.max(0,Math.min(setupCanvas.height-1,(event.clientY-r.top)*setupCanvas.height/r.height));
   scalePoints.push([x,y]);
-  if(scalePoints.length===2){$('scalePixels').value=Math.hypot(scalePoints[1][0]-scalePoints[0][0],scalePoints[1][1]-scalePoints[0][1]).toFixed(2);measuringScale=false;$('measureScale').classList.remove('active');$('scaleConfirmed').checked=false;updateCalibration();jobMessage('픽셀 길이를 측정했습니다. 스케일바에 적힌 실제 길이를 입력하고 확인해주세요.')}
+  if(scalePoints.length===2){$('scalePixels').value=Math.hypot(scalePoints[1][0]-scalePoints[0][0],scalePoints[1][1]-scalePoints[0][1]).toFixed(2);measuringScale=false;$('measureScale').classList.remove('active');$('scaleConfirmed').checked=false;updateCalibration();jobMessage('Enter the scale length in µm and confirm.')}
   drawSetup();
 };
 async function followJob(jobId){
@@ -167,14 +174,14 @@ async function followJob(jobId){
     if(job.status==='complete'){
       localStorage.removeItem('poreActiveJob');await refreshLists();updateHistory(job.dataset);
       await accept(await api('load',{dataset:job.dataset}));showPanel('editor');
-      jobMessage('분석 완료 · '+job.candidate_count+'개 후보. 결과 분석에서 누락과 경계를 보완하세요.');setStatus('분석을 완료했습니다. pore를 확인·수정한 뒤 결과 보고서를 열어주세요.');return;
+      jobMessage('Analysis complete · '+job.candidate_count+' pores');setStatus('Analysis complete.');return;
     }
     await new Promise(resolve=>setTimeout(resolve,1000));
   }
 }
 function validateAnalysisInput(){
-  if(!setupProject)throw new Error('먼저 이미지를 선택해주세요.');
-  const fields={scaleUm:'스케일바에 적힌 실제 길이를 입력해주세요.',scalePixels:'스케일바의 양 끝을 찍거나 픽셀 길이를 입력해주세요.',analysisBottom:'분석 영역의 하단 위치를 확인해주세요.',minContrast:'밝기 차이를 0~255 사이로 입력해주세요.',minArea:'최소 후보 면적을 입력해주세요.'};
+  if(!setupProject)throw new Error('Choose an image first.');
+  const fields={scaleUm:'Enter the scale length in µm.',scalePixels:'Measure or enter the scale length in pixels.',analysisBottom:'Check the bottom boundary.',minContrast:'Enter contrast from 0 to 255.',minArea:'Enter a minimum pore area.'};
   for(const [id,message] of Object.entries(fields)){
     const field=$(id);
     if(field.value===''||!field.checkValidity()){
@@ -182,48 +189,57 @@ function validateAnalysisInput(){
       field.focus();throw new Error(message);
     }
   }
-  if(!$('scaleConfirmed').checked){$('scaleConfirmed').focus();throw new Error('이미지의 스케일바 길이가 맞으면 확인란을 체크해주세요.')}
+  if(!$('scaleConfirmed').checked){$('scaleConfirmed').focus();throw new Error('Confirm calibration first.')}
 }
 $('runAnalysis').onclick=()=>{
   if(busy)return;
   try{validateAnalysisInput()}catch(error){jobMessage(error.message,true);setStatus(error.message,true);return}
-  return workspaceWork('분석을 준비하고 있습니다.',async()=>{
+  return workspaceWork('Preparing analysis…',async()=>{
   const config={...preprocessingPayload(),scale_um:Number($('scaleUm').value),scale_pixels:Number($('scalePixels').value),min_contrast:Number($('minContrast').value),min_area_pixels:Number($('minArea').value),points_per_side:Number($('pointDensity').value),scale_confirmed:$('scaleConfirmed').checked};
   const job=await api('analyze',{project_id:setupProject.id,config});$('analysisProgress').value=0;await followJob(job.job_id);
   });
 };
 window.onEditorAccepted=data=>{
   updateHistory(data.dataset);
-  $('analysisTitle').textContent='결과 보고서 · '+($('dataset').selectedOptions[0]?.textContent??data.dataset)+' · '+(data.revision?'수정본 '+data.revision:'자동 분석');
-  $('analysisSubtitle').textContent='후보 '+data.stats.candidate_count+'개 · 면적률 '+data.stats.candidate_union_area_percent.toFixed(2)+'% · 현재 결과의 면적·직경·공간 분포';
+  const imageName=imageLibrary.find(e=>e.analyses.some(a=>a.dataset===data.dataset))?.name??datasetLabels[data.dataset]??data.dataset;
+  $('editorImageName').textContent=imageName;
+  $('editorImageName').title=imageName;
+  $('analysisTitle').textContent='Report · '+imageName;
+  $('analysisSubtitle').textContent=data.stats.candidate_count+' pores · Area fraction (2D) '+data.stats.candidate_union_area_percent.toFixed(2)+'%';
   const ready=Boolean(data.report_ready??data.report_url);
   $('analysisFrame').classList.toggle('hidden',!ready);$('analysisComparison').closest('section').classList.toggle('hidden',!ready);
   if(ready){$('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url}
   else{$('analysisFrame').removeAttribute('src');$('analysisComparison').removeAttribute('src')}
   if(!$('exportDirectory').value){try{$('exportDirectory').value=localStorage.getItem('poreExportDirectory')||data.export_default_directory||''}catch{$('exportDirectory').value=data.export_default_directory||''}}
-  $('generateReport').textContent=ready?'보고서·이미지 저장':'보고서 생성 및 저장';
+  $('generateReport').textContent=ready?'Export Results':'Generate & Export';
   if($('exportResult').dataset.revisionKey!==data.dataset+':'+data.revision)$('exportResult').textContent='';
-  $('reportGenerationStatus').textContent=ready?'현재 수정본의 보고서가 생성되어 있습니다.':'편집 결과는 저장되어 있습니다. 결과 분석을 마쳤으면 보고서를 생성하세요.';
+  $('reportGenerationStatus').textContent=ready?'Report ready.':'Ready to generate.';
   $('analysisDownloads').replaceChildren();
-  for(const [name,file] of [['후보별 CSV','candidates.csv'],['직경 분포 CSV','diameter_histogram.csv'],['면적 분포 CSV','area_histogram.csv'],['영역별 CSV','spatial_grid.csv'],['요약 JSON','summary.json'],['PDF 보고서','dashboard.pdf']]){
+  for(const [name,file] of [['Pore CSV','candidates.csv'],['Diameter CSV','diameter_histogram.csv'],['Area CSV','area_histogram.csv'],['Spatial CSV','spatial_grid.csv'],['Summary JSON','summary.json'],['PDF Report','dashboard.pdf']]){
     if(ready){const a=document.createElement('a');a.textContent=name;a.href=data.result_base+'/measurements/'+file;a.download=file;$('analysisDownloads').append(a)}
   }
-  $('report').classList.remove('hidden');$('report').textContent='결과 보고서 →';$('report').onclick=e=>{e.preventDefault();showPanel('analysis')};
   // Refresh badges after manual saves without reloading the active mask.
   readImageLibrary().then(acceptLibrary).catch(libraryFailed);
 };
 $('editFromAnalysis').onclick=()=>showPanel('editor');
-$('generateReport').onclick=()=>work('결과 보고서를 생성하고 있습니다.',async()=>{
+$('generateReport').onclick=()=>work('Generating report…',async()=>{
   const directory=$('exportDirectory').value.trim();
-  if(!directory){$('exportDirectory').focus();throw new Error('저장 폴더를 지정해주세요.')}
-  $('reportGenerationStatus').textContent='이미지·측정값·그래프·PDF를 생성하고 있습니다…';
-  try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='저장 완료: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('원본·분석 이미지와 보고서를 함께 저장했습니다.')}
-  catch(error){$('reportGenerationStatus').textContent='생성 실패: '+error.message+' 다시 생성할 수 있습니다.';throw error}
+  if(!directory){$('exportDirectory').focus();throw new Error('Choose an export folder.')}
+  $('reportGenerationStatus').textContent='Generating report and images…';
+  try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='Exported to: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('Results exported.')}
+  catch(error){$('reportGenerationStatus').textContent='Export failed: '+error.message+' Please retry.';throw error}
 });
-$('chooseExportDirectory').onclick=()=>work('저장 폴더를 선택하세요.',async()=>{const result=await api('choose-export-folder',{});if(result.directory)$('exportDirectory').value=result.directory;setStatus('저장 폴더를 확인한 뒤 보고서를 생성하세요.')});
-window.updateToolLayout=()=>{$('selectionActions').classList.toggle('hidden',mode!=='select')};
+$('chooseExportDirectory').onclick=()=>work('Choose a folder.',async()=>{const result=await api('choose-export-folder',{});if(result.directory)$('exportDirectory').value=result.directory;setStatus('Export folder selected.')});
+window.updateToolLayout=()=>{
+  const selecting=mode==='select',cutting=mode==='cut';
+  $('selectionActions').classList.toggle('hidden',!selecting);
+  $('cutPanel').classList.toggle('hidden',!cutting);
+  $('regionPanel').classList.toggle('hidden',selecting||cutting);
+  $('previewControls').classList.toggle('hidden',selecting||cutting);
+  document.querySelector('.tool-history').classList.toggle('hidden',selecting);
+};
 window.updateToolLayout();
-$('editFromAnalysis').textContent='결과 분석으로 돌아가기';
-$('settingsFromAnalysis').textContent='전처리 다시 설정';
-$('settingsFromAnalysis').onclick=()=>workspaceWork('이 이미지로 새 분석을 준비하고 있습니다.',()=>prepareExisting(state.dataset));
-(async()=>{try{while(busy)await new Promise(resolve=>setTimeout(resolve,50));await refreshLists();if(state)window.onEditorAccepted(state);const job=localStorage.getItem('poreActiveJob');if(job)await workspaceWork('진행 중인 분석을 확인하고 있습니다.',()=>followJob(job))}catch(error){jobMessage(error.message,true)}})();
+$('editFromAnalysis').textContent='Back to Editor';
+$('settingsFromAnalysis').textContent='Reprocess Image';
+$('settingsFromAnalysis').onclick=()=>workspaceWork('Loading settings…',()=>prepareExisting(state.dataset));
+(async()=>{try{while(busy)await new Promise(resolve=>setTimeout(resolve,50));await refreshLists();if(state)window.onEditorAccepted(state);const job=localStorage.getItem('poreActiveJob');if(job)await workspaceWork('Checking active analysis…',()=>followJob(job))}catch(error){jobMessage(error.message,true)}})();

@@ -43,7 +43,7 @@ def main():
             browser=p.chromium.launch(executable_path=r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',headless=True)
             page=browser.new_page(viewport=dict(width=1700,height=1100));page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.server_port}')
-            page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
+            page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
             def click_pixel(x,y,shift=False):
                 rect=page.locator('#image').bounding_box()
                 if shift:page.keyboard.down('Control')

@@ -20,7 +20,7 @@ from PIL import Image
 from scipy import ndimage as ndi
 import torch
 
-from analyze_candidates import measure_masks, export_folder
+from analyze_candidates import measure_masks, export_folder, current_report_exists
 from segment_first_pass import overlay
 from result_paths import read_artifact
 from project_workflow import ProjectWorkflow
@@ -37,7 +37,7 @@ CONTAINMENT_THRESHOLD = .95
 
 def validated_candidate_ids(masks, ids):
     if not isinstance(ids,list) or not ids or any(type(i) is not int or i not in masks for i in ids):
-        raise ValueError('선택한 pore를 확인해주세요.')
+        raise ValueError('Select valid pores.')
     return sorted(set(ids))
 
 
@@ -111,7 +111,7 @@ class Editor:
     def baseline(self, dataset):
         if dataset in DATASETS: return ROOT/'outputs'/f'{dataset}_first_pass'
         datasets = self.workflow.datasets()
-        if dataset not in datasets: raise ValueError('이미지를 찾을 수 없습니다.')
+        if dataset not in datasets: raise ValueError('Image not found.')
         return datasets[dataset][0]
 
     def datasets(self):
@@ -141,13 +141,13 @@ class Editor:
             if not (baseline/'report.json').is_file(): continue
             report=json.loads((baseline/'report.json').read_text(encoding='utf-8'))
             source=ROOT/report['image']
-            add(source,source.name,f'/baseline-files/{dataset}/images/entrance_candidates_overlay.png',datasets=[(dataset,'기존 분석')])
+            add(source,source.name,f'/baseline-files/{dataset}/images/entrance_candidates_overlay.png',datasets=[(dataset,'Saved analysis')])
         with self.workflow.lock:
             projects=copy.deepcopy(list(self.workflow.projects.values()))
         for project in projects:
             source=self.workflow.root/project['id']/project['original_file']
             add(source,project['name'],f"/project-files/{project['id']}/input/normalized.png",project['id'],
-                [(r['dataset'],f"분석 {r['number']}") for r in project['runs']])
+                [(r['dataset'],f"Analysis {r['number']}") for r in project['runs']])
         for entry in groups.values():
             entry['analyses'].sort(key=lambda r:r['updated'],reverse=True)
             latest=entry['analyses'][0] if entry['analyses'] else None
@@ -157,7 +157,7 @@ class Editor:
 
     def open_image(self, image_id):
         entry=next((e for e in self.image_library() if e['id']==image_id),None)
-        if entry is None: raise ValueError('이미지 목록을 새로고침한 뒤 다시 선택해주세요.')
+        if entry is None: raise ValueError('Refresh the image list and select again.')
         if entry['analyzed']: return dict(dataset=entry['latest_dataset'],image=entry)
         return dict(project=self.workflow.inspect(entry['project_id']),image=entry)
 
@@ -175,7 +175,7 @@ class Editor:
             state = dict(dataset=dataset, baseline=baseline, report=report, gray=gray, revision=0,
                          history=[], next_id=report["entrance_candidate_count"]+1, preview=None)
             state['sam_gray']=np.asarray(Image.open(report['sam_input_image']).convert('L')) if report.get('sam_input_image') else gray
-            if state['sam_gray'].shape!=gray.shape: raise ValueError('분석용 영상과 원본의 크기가 다릅니다.')
+            if state['sam_gray'].shape!=gray.shape: raise ValueError('Analysis and source image dimensions differ.')
             latest = self.output_root / dataset / "latest.json"
             revision = json.loads(latest.read_text())["revision"] if latest.exists() else 0
             state.update(self.snapshot(state, revision))
@@ -221,7 +221,7 @@ class Editor:
         result_base = f"/files/{state['dataset']}/revision_{state['revision']:04d}" if state['revision'] else f"/baseline-files/{state['dataset']}"
         folder = self.revision_folder(state['dataset'],state['revision']) if state['revision'] else state['baseline']
         stored_report = json.loads((folder/'report.json').read_text(encoding='utf-8'))
-        report_ready = (folder/'measurements/index.html').is_file() and (not stored_report.get('report_deferred') or (folder/'report_ready.json').is_file())
+        report_ready = current_report_exists(folder) and (not stored_report.get('report_deferred') or (folder/'report_ready.json').is_file())
         report_url = result_base + '/measurements/index.html' if report_ready else None
         return dict(dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
                     image=png_url(Image.fromarray(state["gray"])),overlay=png_url(Image.fromarray(rgba)),
@@ -234,14 +234,14 @@ class Editor:
 
     def check_revision(self,state,payload):
         if payload.get("revision") != state["revision"]:
-            raise ValueError("다른 작업으로 결과가 변경됐습니다. 이미지를 다시 불러오세요.")
+            raise ValueError("Results changed in another session. Reload the image.")
 
     def coords(self, values, shape):
         array = np.asarray(values,dtype=np.float32)
         if array.ndim != 2 or array.shape[1] != 2 or len(array)>2000 or not np.isfinite(array).all():
-            raise ValueError("좌표가 올바르지 않습니다.")
+            raise ValueError("Invalid coordinates.")
         if (array<0).any() or (array[:,0]>=shape[1]).any() or (array[:,1]>=shape[0]).any():
-            raise ValueError("점은 분석 이미지 안에 표시해주세요.")
+            raise ValueError("Place points inside the image.")
         return array
 
     def preview(self,state,payload,polygon=False):
@@ -249,7 +249,7 @@ class Editor:
         effective_prompts=None
         if polygon:
             points=self.coords(payload.get("polygon",[]),state["gray"].shape)
-            if len(points)<3: raise ValueError("다각형에는 3개 이상의 점이 필요합니다.")
+            if len(points)<3: raise ValueError("A polygon needs at least three vertices.")
             mask=np.zeros(state["gray"].shape,np.uint8)
             cv2.fillPoly(mask,[np.rint(points).astype(np.int32)],1)
             masks=[mask.astype(bool)]
@@ -259,16 +259,16 @@ class Editor:
             labels = payload.get("labels",[])
             coords=self.coords(points,state["gray"].shape) if points else None
             if len(labels)!=len(points) or any(v not in [0,1] for v in labels):
-                raise ValueError("포함·제외 점 입력이 올바르지 않습니다.")
+                raise ValueError("Invalid include/exclude points.")
             box=payload.get("box")
             selection=payload.get("shape")
             if selection is not None:
                 if not isinstance(selection,dict) or selection.get("kind")!="ellipse" or box is not None:
-                    raise ValueError("박스 또는 타원형 하나를 지정해주세요.")
+                    raise ValueError("Draw one box or ellipse.")
                 values=np.asarray([selection.get(k) for k in ['cx','cy','rx','ry']],dtype=np.float64)
-                if not np.isfinite(values).all(): raise ValueError("타원 좌표가 올바르지 않습니다.")
+                if not np.isfinite(values).all(): raise ValueError("Invalid ellipse coordinates.")
                 cx,cy,rx,ry=values
-                if rx<1.5 or ry<1.5: raise ValueError("타원을 조금 더 크게 그려주세요.")
+                if rx<1.5 or ry<1.5: raise ValueError("Draw a larger ellipse.")
                 box=[cx-rx,cy-ry,cx+rx,cy+ry]
                 # SAM accepts boxes/points. Negative corner prompts distinguish
                 # the oval selection from its enclosing rectangular box.
@@ -280,11 +280,11 @@ class Editor:
                 coords=self.coords(points,state["gray"].shape)
             if box is not None:
                 box=np.asarray(box,dtype=np.float32)
-                if box.shape!=(4,): raise ValueError("박스 좌표가 올바르지 않습니다.")
+                if box.shape!=(4,): raise ValueError("Invalid box coordinates.")
                 self.coords(box.reshape(2,2),state["gray"].shape)
-                if box[2]-box[0]<3 or box[3]-box[1]<3: raise ValueError("박스를 조금 더 크게 그려주세요.")
+                if box[2]-box[0]<3 or box[3]-box[1]<3: raise ValueError("Draw a larger box.")
             if box is None and (not labels or 1 not in labels):
-                raise ValueError("박스·타원형 또는 포함(+) 점을 지정해주세요.")
+                raise ValueError("Draw a box, ellipse or include point.")
             if selection is not None:
                 effective_prompts=dict(box=box.tolist(),points=coords.tolist(),labels=labels)
             with inference_context(self.device):
@@ -305,7 +305,7 @@ class Editor:
     def preview_masks(self,state,payload,masks,scores,source,effective_prompts=None):
         self.check_revision(state,payload)
         valid=[(m,s) for m,s in zip(masks,scores) if m.any()]
-        if not valid: raise ValueError("빈 결과입니다. 점이나 박스를 바꿔주세요.")
+        if not valid: raise ValueError("Empty result. Adjust the region or points.")
         token=secrets.token_urlsafe(18)
         state["preview"]=dict(token=token,masks=[m for m,s in valid],prompts=copy.deepcopy(payload),
                               source=source)
@@ -329,21 +329,21 @@ class Editor:
         self.check_revision(state,payload)
         preview=state['preview']
         if not preview or payload.get('token')!=preview['token']:
-            raise ValueError('미리보기를 다시 실행해주세요.')
+            raise ValueError('Generate a new preview.')
         choice=payload.get('choice',0)
         if type(choice) is not int or not 0<=choice<len(preview['masks']):
-            raise ValueError('후보 선택을 확인해주세요.')
+            raise ValueError('Select a valid preview.')
         target=payload.get('target_id')
         if target is not None and (type(target) is not int or target not in state['masks']):
-            raise ValueError('수정할 후보 번호를 확인해주세요.')
+            raise ValueError('Select a valid target pore.')
         mask=preview['masks'][choice]
         replaced=set(contained_candidates(mask,state['masks']))
         if target is not None: replaced.add(target)
         conflicts=[i for i,m in state['masks'].items() if i not in replaced and (mask&m).any()]
-        if not conflicts: raise ValueError('제외할 겹침이 없습니다.')
+        if not conflicts: raise ValueError('No overlap to trim.')
         clipped=mask.copy()
         for i in conflicts: clipped &= ~state['masks'][i]
-        if not clipped.any(): raise ValueError('겹친 부분을 제외하면 남는 영역이 없습니다. 기존 pore를 교체할 대상으로 선택해주세요.')
+        if not clipped.any(): raise ValueError('Trimming removes the entire region. Select the existing pore as the replacement target.')
         # Disconnected regions are separate choices, never one pore spanning islands.
         components,count=ndi.label(clipped,structure=np.ones((3,3)))
         pieces=sorted((components==i for i in range(1,count+1)),key=lambda m:int(m.sum()),reverse=True)
@@ -393,10 +393,10 @@ class Editor:
         directory=payload.get('export_directory')
         if directory is not None:
             if not isinstance(directory,str) or not directory.strip() or not Path(directory.strip()).expanduser().is_absolute():
-                raise ValueError('저장 폴더의 전체 경로를 지정해주세요.')
+                raise ValueError('Enter the full export folder path.')
         folder = self.revision_folder(state['dataset'],state['revision']) if state['revision'] else state['baseline']
         stored = json.loads((folder/'report.json').read_text(encoding='utf-8'))
-        ready = (folder/'measurements/index.html').is_file() and (not stored.get('report_deferred') or (folder/'report_ready.json').is_file())
+        ready = current_report_exists(folder) and (not stored.get('report_deferred') or (folder/'report_ready.json').is_file())
         if not ready:
             save_images(folder,state['gray'],state['masks'])
             export_folder(folder)
@@ -416,17 +416,17 @@ class Editor:
         history=state["history"]+[state["revision"]]
         next_id=state["next_id"]
         if action=="undo":
-            if not state["history"]: raise ValueError("취소할 수정이 없습니다.")
+            if not state["history"]: raise ValueError("Nothing to undo.")
             restored=self.snapshot(state,state["history"][-1])
             return self.save(state,restored["masks"],restored["annotations"],state["history"][:-1],next_id,dict(type="undo"))
         if action=='resolve-overlaps':
-            if not overlap_pixels(masks.values()):raise ValueError('정리할 겹침이 없습니다.')
+            if not overlap_pixels(masks.values()):raise ValueError('No overlaps to resolve.')
             return self.save(state,masks,annotations,history,next_id,dict(type='resolve-overlaps'))
         if action=='cut':
             path=self.coords(payload.get('path', []), state['gray'].shape)
             width=payload.get('width', 3)
             if len(path)<2 or type(width) is not int or not 1<=width<=30:
-                raise ValueError('절단 경로를 드래그하고 폭을 1~30px로 지정해주세요.')
+                raise ValueError('Draw a cut with width from 1 to 30 px.')
             cutter=np.zeros(state['gray'].shape, np.uint8)
             cv2.polylines(cutter, [np.rint(path).astype(np.int32)], False, 1, 1)
             if width>1:
@@ -448,7 +448,7 @@ class Editor:
                     annotations[str(child_id)]=dict(original_annotation, source='manual_cut', review_status='user_accepted', cut_from=candidate_id)
                     child_ids.append(child_id)
                 changed.append(dict(candidate_id=candidate_id, resulting_ids=child_ids))
-            if not changed: raise ValueError('절단 경로가 pore와 겹치지 않습니다.')
+            if not changed: raise ValueError('The cut does not intersect a pore.')
             return self.save(state,masks,annotations,history,next_id,dict(type='cut', path=path.tolist(),width=width,changed=changed))
         if action=='delete':
             ids=validated_candidate_ids(masks,payload.get('target_ids',[payload.get('target_id')]))
@@ -460,24 +460,24 @@ class Editor:
             return self.save(state,masks,annotations,history,next_id,detail)
         target=payload.get("target_id")
         if target is not None and (type(target) is not int or target not in masks):
-            raise ValueError("수정할 후보 번호를 확인해주세요.")
+            raise ValueError("Select a valid target pore.")
         preview=state["preview"]
-        if not preview or payload.get("token")!=preview["token"]: raise ValueError("미리보기를 다시 실행해주세요.")
+        if not preview or payload.get("token")!=preview["token"]: raise ValueError("Generate a new preview.")
         choice=payload.get("choice",0)
-        if type(choice) is not int or not 0<=choice<len(preview["masks"]): raise ValueError("후보 선택을 확인해주세요.")
+        if type(choice) is not int or not 0<=choice<len(preview["masks"]): raise ValueError("Select a valid preview.")
         mask=preview["masks"][choice]
         contained_ids=contained_candidates(mask,masks)
         replaced_ids=sorted(set(contained_ids + ([target] if target is not None else [])))
         conflicts=[i for i,old in masks.items() if i not in replaced_ids and (mask&old).any()]
         if conflicts:
-            raise ValueError('기존 pore '+', '.join(map(str,conflicts))+'번과 일부 겹칩니다. 경계를 보완하거나 교체할 대상을 선택해주세요. 겹치는 상태로는 저장할 수 없습니다.')
+            raise ValueError('Overlaps pores '+', '.join(map(str,conflicts))+'. Refine the boundary or select a replacement target.')
         if target is None:
             target=next_id
             next_id+=1
         # Exact or near duplicate additions usually mean the user intended a replacement.
         for old_id,old in masks.items():
             if old_id not in replaced_ids and (mask&old).sum()/(mask|old).sum()>.9:
-                raise ValueError(f"기존 {old_id}번과 거의 같은 영역입니다. 해당 번호를 선택해 교체해주세요.")
+                raise ValueError(f"Nearly identical to pore {old_id}. Select it as the replacement target.")
         for old_id in replaced_ids:
             del masks[old_id]
             annotations.pop(str(old_id),None)
@@ -548,13 +548,13 @@ def make_handler(editor):
             try:
                 length=int(self.headers.get("Content-Length","0"))
                 limit=45_000_000 if self.path=='/api/upload' else 1_000_000
-                if not 0<length<limit: raise ValueError("입력이 너무 큽니다.")
+                if not 0<length<limit: raise ValueError("Input is too large.")
                 payload=json.loads(self.rfile.read(length))
                 if self.path=='/api/choose-export-folder':
                     import subprocess,sys
                     picker="import tkinter as tk; from tkinter import filedialog; r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True); p=filedialog.askdirectory(title='PoreSAM - Select export folder',parent=r); print(p,flush=True); r.destroy()"
                     selected=subprocess.run([sys.executable,'-c',picker],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                    if selected.returncode:raise ValueError('폴더 선택 창을 열 수 없습니다. 경로를 직접 입력해주세요.')
+                    if selected.returncode:raise ValueError('Cannot open the folder picker. Enter the path manually.')
                     return self.send(200,dict(directory=selected.stdout.strip()))
                 if self.path=='/api/upload':
                     result=editor.receive_image(payload.get('name',''),base64.b64decode(payload.get('content',''),validate=True))
@@ -579,7 +579,7 @@ def make_handler(editor):
                     source=ROOT/report['image']
                     return self.send(200,editor.workflow.upload(source.name,source.read_bytes(),seed=baseline))
                 if editor.workflow.running:
-                    raise ValueError('자동 분석이 끝난 뒤 pore 수정을 계속해주세요.')
+                    raise ValueError('Wait for analysis to finish before editing.')
                 with editor.lock:
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
@@ -616,7 +616,7 @@ def make_handler(editor):
             except Exception as exc:
                 import traceback
                 traceback.print_exc()
-                self.send(500,dict(error=f"처리 실패: {exc}"))
+                self.send(500,dict(error=f"Request failed: {exc}"))
     return Handler
 
 
@@ -636,6 +636,6 @@ if __name__=="__main__":
     try:editor=Editor(device=args.device)
     except ValueError as exc:parser.error(str(exc))
     try:server=LocalPoreServer(("127.0.0.1",args.port),make_handler(editor))
-    except OSError as exc:parser.error(f'포트 {args.port}에 서버를 열 수 없습니다. 이미 실행 중인 Pore Editor를 확인해주세요. ({exc})')
+    except OSError as exc:parser.error(f'Cannot open port {args.port}. Check for an existing PoreSAM server. ({exc})')
     print(f"Pore Editor: http://127.0.0.1:{args.port} | Device: {editor.device.upper()} | {Path(__file__).resolve()}",flush=True)
     server.serve_forever()

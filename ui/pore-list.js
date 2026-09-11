@@ -12,16 +12,16 @@
       const active=selected.has(Number(row.dataset.id));
       row.classList.toggle('selected',active);row.setAttribute('aria-selected',String(active));
     });
-    $('selectedPoreCount').textContent=selected.size+'개 선택';
+    $('selectedPoreCount').textContent=selected.size+' selected';
   }
   async function renderSelection(centerId=null){
     const version=++generation;mask=null;tintedColor=null;selectionRows();draw();controls();
-    if(!state||!selected.size){$('poreSelectionInfo').textContent='pore를 선택하세요.';return}
+    if(!state||!selected.size){$('poreSelectionInfo').textContent='No selection';return}
     const dataset=state.dataset,revision=state.revision,ids=[...selected];
-    $('poreSelectionInfo').textContent=ids.length+'개 pore 선택 · Ctrl+클릭으로 추가/제외';
+    $('poreSelectionInfo').textContent=ids.length+' pores selected';
     if(ids.length===1){
       const row=state.candidates.find(c=>c.candidate_id===ids[0]);
-      if(row)$('poreSelectionInfo').textContent=ids[0]+'번 · '+row.area_um2.toFixed(2)+' µm² · 직경 '+row.equivalent_diameter_um.toFixed(2)+' µm · Roundness '+(row.roundness==null?'—':row.roundness.toFixed(3));
+      if(row)$('poreSelectionInfo').textContent=ids[0]+' · '+row.area_um2.toFixed(2)+' µm² · Diameter '+row.equivalent_diameter_um.toFixed(2)+' µm · Roundness '+(row.roundness==null?'—':row.roundness.toFixed(3));
     }
     try{
       const result=await api('pore-highlight',{dataset,revision,candidate_ids:ids});
@@ -76,7 +76,7 @@
       if(epoch!==pickEpoch||state?.dataset!==dataset||state?.revision!==revision||mode!=='select'||busy)return;
       if(result.candidate_id===null){if(!toggle){selected.clear();await renderSelection()}return}
       await selectPore(result.candidate_id,toggle,false);
-      if(epoch===pickEpoch&&mode==='select')setStatus(selected.size+'개 pore 선택 · Ctrl+클릭으로 추가/제외 · Delete로 삭제');
+      if(epoch===pickEpoch&&mode==='select')setStatus(selected.size+' pores selected');
     }).catch(error=>{if(epoch===pickEpoch)setStatus(error.message,true)}).finally(()=>{pendingPicks--;controls()});
     return pickQueue;
   };
@@ -87,6 +87,6 @@
     if(busy||!state)return;
     if(mode!=='select')document.querySelector('[data-mode="select"]').click();
     pickEpoch++;selected=new Set(state.candidates.filter(c=>c.touches_image_edge).map(c=>c.candidate_id));
-    renderSelection();setStatus('경계 pore '+selected.size+'개 선택 · 남길 pore를 Ctrl+클릭으로 제외한 뒤 Delete를 누르세요.');
+    renderSelection();setStatus('Boundary pores: '+selected.size+' selected');
   };
 })();

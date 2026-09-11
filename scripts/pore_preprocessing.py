@@ -6,15 +6,15 @@ import numpy as np
 def adjustable_config(values):
     normalize = values.get('normalize_enabled', True)
     if type(normalize) is not bool:
-        raise ValueError('밝기 정규화 설정을 확인해주세요.')
+        raise ValueError('Check normalization settings.')
     method = values.get('blur_method', 'none')
     if method not in ['none', 'gaussian', 'box', 'median', 'bilateral', 'kuwahara']:
-        raise ValueError('필터 방식을 확인해주세요.')
+        raise ValueError('Select a valid filter.')
     result = dict(mode='adjustable', normalize_enabled=normalize, blur_method=method)
     for name, default, maximum in [('background_strength', 0, 30), ('blur_strength', 2, 10)]:
         value = values.get(name, default)
         if type(value) not in (int, float) or not np.isfinite(value) or int(value) != value or not 0 <= value <= maximum:
-            raise ValueError('전처리 강도가 범위를 벗어났습니다.')
+            raise ValueError('Processing strength is out of range.')
         result[name] = int(value)
     return result
 
@@ -65,9 +65,9 @@ def prepare_adjustable(gray, config):
 
 def preprocessing_config(mode='normalize', strength='medium'):
     if mode not in ['none','normalize','coarse','structure']:
-        raise ValueError('전처리 방식을 다시 선택해주세요.')
+        raise ValueError('Select a valid preprocessing method.')
     if strength not in ['weak','medium','strong','detail']:
-        raise ValueError('구조 약화 강도를 다시 선택해주세요.')
+        raise ValueError('Select a valid background removal strength.')
     config=dict(mode=mode)
     if mode in ['normalize','coarse']: config['percentiles']=[2,98]
     if mode in ['coarse','structure']:
