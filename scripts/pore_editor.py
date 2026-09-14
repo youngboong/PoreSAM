@@ -223,7 +223,7 @@ class Editor:
         stored_report = json.loads((folder/'report.json').read_text(encoding='utf-8'))
         report_ready = current_report_exists(folder) and (not stored_report.get('report_deferred') or (folder/'report_ready.json').is_file())
         report_url = result_base + '/measurements/index.html' if report_ready else None
-        return dict(dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
+        return dict(cut_paths_supported=True,dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
                     image=png_url(Image.fromarray(state["gray"])),overlay=png_url(Image.fromarray(rgba)),
                     fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
                     stats=stats, candidates=table.astype(object).where(table.notna(),None).to_dict(orient="records"),can_undo=bool(state["history"]),report_url=report_url,
@@ -246,6 +246,8 @@ class Editor:
 
     def preview(self,state,payload,polygon=False):
         self.check_revision(state,payload)
+        if payload.get('queue_preview') and len(state.get('queued_previews',{}))>=32:
+            raise ValueError('Preview queue is full. Clear the queue and retry (maximum 32 regions).')
         effective_prompts=None
         if polygon:
             points=self.coords(payload.get("polygon",[]),state["gray"].shape)
@@ -300,7 +302,23 @@ class Editor:
             masks=[masks[i].astype(bool) for i in order]
             scores=[float(scores[i]) for i in order]
         if payload.get("fill_holes",True): masks=[ndi.binary_fill_holes(m) for m in masks]
-        return self.preview_masks(state,payload,masks,scores,"manual_polygon" if polygon else "prompted_sam",effective_prompts)
+        result=self.preview_masks(state,payload,masks,scores,"manual_polygon" if polygon else "prompted_sam",effective_prompts)
+        if payload.get('queue_preview'):
+            cached=state['preview']
+            state.setdefault('queued_previews',{})[result['token']]=dict(
+                masks=[np.packbits(mask) for mask in cached['masks']],
+                scores=[item['score'] for item in result['choices']],
+                prompts=copy.deepcopy(cached['prompts']),source=cached['source'])
+        return result
+
+    def queued_preview(self,state,payload):
+        self.check_revision(state,payload)
+        cached=state.get('queued_previews',{}).get(payload.get('queue_token'))
+        if cached is None:raise ValueError('Queued preview expired. Run Preview All again.')
+        masks=[np.unpackbits(mask,count=state['gray'].size).reshape(state['gray'].shape).astype(bool) for mask in cached['masks']]
+        prompts=dict(cached['prompts'],revision=state['revision'])
+        # Recalculate containment/overlap against the current saved masks, without rerunning SAM.
+        return self.preview_masks(state,prompts,masks,cached['scores'],cached['source'])
 
     def preview_masks(self,state,payload,masks,scores,source,effective_prompts=None):
         self.check_revision(state,payload)
@@ -423,12 +441,14 @@ class Editor:
             if not overlap_pixels(masks.values()):raise ValueError('No overlaps to resolve.')
             return self.save(state,masks,annotations,history,next_id,dict(type='resolve-overlaps'))
         if action=='cut':
-            path=self.coords(payload.get('path', []), state['gray'].shape)
+            paths=payload.get('paths',[payload.get('path',[])])
             width=payload.get('width', 3)
-            if len(path)<2 or type(width) is not int or not 1<=width<=30:
+            if not isinstance(paths,list) or not 1<=len(paths)<=32 or type(width) is not int or not 1<=width<=30:
                 raise ValueError('Draw a cut with width from 1 to 30 px.')
+            paths=[self.coords(path,state['gray'].shape) for path in paths]
+            if any(len(path)<2 for path in paths):raise ValueError('Each cut needs at least two points.')
             cutter=np.zeros(state['gray'].shape, np.uint8)
-            cv2.polylines(cutter, [np.rint(path).astype(np.int32)], False, 1, 1)
+            cv2.polylines(cutter, [np.rint(path).astype(np.int32) for path in paths], False, 1, 1)
             if width>1:
                 cutter=cv2.dilate(cutter,cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(width,width)))
             cut_pixels=cutter.astype(bool)
@@ -449,7 +469,20 @@ class Editor:
                     child_ids.append(child_id)
                 changed.append(dict(candidate_id=candidate_id, resulting_ids=child_ids))
             if not changed: raise ValueError('The cut does not intersect a pore.')
-            return self.save(state,masks,annotations,history,next_id,dict(type='cut', path=path.tolist(),width=width,changed=changed))
+            detail=dict(type='cut',paths=[path.tolist() for path in paths],width=width,changed=changed)
+            if len(paths)==1:detail['path']=paths[0].tolist()
+            return self.save(state,masks,annotations,history,next_id,detail)
+        if action=='merge':
+            ids=validated_candidate_ids(masks,payload.get('target_ids',[]))
+            if len(ids)<2:raise ValueError('Select at least two pores to merge.')
+            target=min(ids)
+            merged=np.logical_or.reduce([masks[i] for i in ids])
+            for candidate_id in ids:
+                del masks[candidate_id]
+                annotations.pop(str(candidate_id),None)
+            masks[target]=merged
+            annotations[str(target)]=dict(source='manual_merge',review_status='user_accepted',merged_from=ids)
+            return self.save(state,masks,annotations,history,next_id,dict(type='merge',candidate_ids=ids,resulting_id=target))
         if action=='delete':
             ids=validated_candidate_ids(masks,payload.get('target_ids',[payload.get('target_id')]))
             for candidate_id in ids:
@@ -509,7 +542,7 @@ def make_handler(editor):
             path=unquote(urlsplit(self.path).path)
             if path=="/":
                 return self.send(200,(ROOT/"ui/editor.html").read_bytes(),"text/html; charset=utf-8")
-            if path in ['/workspace.js','/workspace.css','/trials.js','/large-pores.js','/comparison.js','/pore-list.js','/pore-details.js']:
+            if path in ['/workspace.js','/workspace.css','/trials.js','/large-pores.js','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js']:
                 return self.send(200,(ROOT/'ui'/path[1:]).read_bytes(),'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
             if path=="/api/datasets": return self.send(200,editor.datasets())
             if path=="/api/projects": return self.send(200,dict(projects=editor.workflow.list_projects()))
@@ -584,6 +617,10 @@ def make_handler(editor):
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
                     elif self.path=='/api/generate-report': result=editor.generate_report(state,payload)
+                    elif self.path=='/api/export-images':
+                        editor.check_revision(state,payload)
+                        from report_bundle import export_images
+                        result=dict(exported_folder=export_images(editor,state,payload))
                     elif self.path=='/api/details-plot':
                         editor.check_revision(state,payload)
                         from pore_details_export import export_plot
@@ -607,7 +644,12 @@ def make_handler(editor):
                         result=editor.preview(state,payload,self.path.endswith("polygon"))
                     elif self.path=='/api/trim-preview-overlap':
                         result=editor.trim_preview_overlap(state,payload)
-                    elif self.path in ["/api/apply","/api/delete","/api/undo","/api/resolve-overlaps","/api/cut"]:
+                    elif self.path=='/api/queued-preview': result=editor.queued_preview(state,payload)
+                    elif self.path=='/api/clear-preview-queue':
+                        editor.check_revision(state,payload)
+                        state['queued_previews']={}
+                        result=dict(cleared=True)
+                    elif self.path in ["/api/apply","/api/delete","/api/undo","/api/resolve-overlaps","/api/cut","/api/merge"]:
                         result=editor.mutate(state,payload,self.path.rsplit("/",1)[1])
                     else: return self.send(404,dict(error="Not found"))
                 self.send(200,result)

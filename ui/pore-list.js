@@ -82,7 +82,6 @@
   };
   window.clearPoreHighlight=clearSelection;
   $('clearPoreSelection').onclick=clearSelection;
-  $('clearImageSelection').onclick=clearSelection;
   $('selectBoundaryPores').onclick=()=>{
     if(busy||!state)return;
     if(mode!=='select')document.querySelector('[data-mode="select"]').click();

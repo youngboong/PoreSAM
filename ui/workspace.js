@@ -52,17 +52,16 @@ function updateHistory(selected){
   $('dataset').value=selected;
 }
 function renderImageLibrary(){
-  $('imageLibrary').replaceChildren();$('pendingImages').replaceChildren();
-  for(const entry of imageLibrary){
+  $('imageLibrary').replaceChildren();
+  for(const entry of imageLibrary.filter(entry=>entry.analyzed)){
     const card=document.createElement('button');card.className='image-card';card.dataset.imageId=entry.id;card.dataset.analyzed=String(entry.analyzed);
     const thumbnail=document.createElement('img');thumbnail.src=entry.preview_url;thumbnail.alt='';thumbnail.loading='lazy';
     const name=document.createElement('strong');name.textContent=entry.name;
-    const detail=document.createElement('span');detail.className='hint';detail.textContent=entry.analyzed?'Saved analysis':'Ready to preprocess';
+    const detail=document.createElement('span');detail.className='hint';detail.textContent='Saved analysis';
     const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'Open Analysis →':'Preprocess →';
     card.append(thumbnail,name,detail,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
-    $(entry.analyzed?'imageLibrary':'pendingImages').append(card);
+    $('imageLibrary').append(card);
   }
-  $('pendingImagesSection').classList.toggle('hidden',!$('pendingImages').children.length);
   if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='No saved analyses.';$('imageLibrary').append(message)}
   controls();
 }
@@ -157,7 +156,6 @@ async function refreshPreprocessing(){
 }
 for(const id of ['normalizeEnabled','backgroundStrength','blurMethod','blurStrength'])$(id).addEventListener('input',invalidatePreprocessing);
 $('measureScale').onclick=()=>{if(!setupProject){jobMessage('Choose an image first.',true);return}measuringScale=!measuringScale;scalePoints=[];$('measureScale').classList.toggle('active',measuringScale);drawSetup();jobMessage('Click both ends of the scale bar.')};
-$('clearScaleLine').onclick=()=>{scalePoints=[];measuringScale=false;$('measureScale').classList.remove('active');drawSetup()};
 $('scaleConfirmed').onchange=()=>{if($('scaleConfirmed').checked)jobMessage('Ready to analyze.')};
 setupCanvas.onclick=event=>{
   if(busy||!setupProject||!measuringScale)return;
@@ -204,14 +202,14 @@ window.onEditorAccepted=data=>{
   const imageName=imageLibrary.find(e=>e.analyses.some(a=>a.dataset===data.dataset))?.name??datasetLabels[data.dataset]??data.dataset;
   $('editorImageName').textContent=imageName;
   $('editorImageName').title=imageName;
-  $('analysisTitle').textContent='Report · '+imageName;
+  $('analysisTitle').textContent='Generate Report · '+imageName;
   $('analysisSubtitle').textContent=data.stats.candidate_count+' pores · Area fraction (2D) '+data.stats.candidate_union_area_percent.toFixed(2)+'%';
   const ready=Boolean(data.report_ready??data.report_url);
   $('analysisFrame').classList.toggle('hidden',!ready);$('analysisComparison').closest('section').classList.toggle('hidden',!ready);
   if(ready){$('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url}
   else{$('analysisFrame').removeAttribute('src');$('analysisComparison').removeAttribute('src')}
   if(!$('exportDirectory').value){try{$('exportDirectory').value=localStorage.getItem('poreExportDirectory')||data.export_default_directory||''}catch{$('exportDirectory').value=data.export_default_directory||''}}
-  $('generateReport').textContent=ready?'Export Results':'Generate & Export';
+  $('generateReport').textContent=ready?'Save Report':'Generate Report';
   if($('exportResult').dataset.revisionKey!==data.dataset+':'+data.revision)$('exportResult').textContent='';
   $('reportGenerationStatus').textContent=ready?'Report ready.':'Ready to generate.';
   $('analysisDownloads').replaceChildren();
@@ -226,7 +224,7 @@ $('generateReport').onclick=()=>work('Generating report…',async()=>{
   const directory=$('exportDirectory').value.trim();
   if(!directory){$('exportDirectory').focus();throw new Error('Choose an export folder.')}
   $('reportGenerationStatus').textContent='Generating report and images…';
-  try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='Exported to: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('Results exported.')}
+  try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='Exported to: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('Report saved.')}
   catch(error){$('reportGenerationStatus').textContent='Export failed: '+error.message+' Please retry.';throw error}
 });
 $('chooseExportDirectory').onclick=()=>work('Choose a folder.',async()=>{const result=await api('choose-export-folder',{});if(result.directory)$('exportDirectory').value=result.directory;setStatus('Export folder selected.')});
@@ -243,3 +241,12 @@ $('editFromAnalysis').textContent='Back to Editor';
 $('settingsFromAnalysis').textContent='Reprocess Image';
 $('settingsFromAnalysis').onclick=()=>workspaceWork('Loading settings…',()=>prepareExisting(state.dataset));
 (async()=>{try{while(busy)await new Promise(resolve=>setTimeout(resolve,50));await refreshLists();if(state)window.onEditorAccepted(state);const job=localStorage.getItem('poreActiveJob');if(job)await workspaceWork('Checking active analysis…',()=>followJob(job))}catch(error){jobMessage(error.message,true)}})();
+
+$('saveEditorImages').onclick=()=>work('Choose an image destination folder.',async()=>{
+  if(!state)return;
+  const picked=await api('choose-export-folder',{});
+  if(!picked.directory){setStatus('Image export canceled.');return;}
+  setStatus('Saving images...');
+  const result=await api('export-images',{...payload(),directory:picked.directory,color:$('poreColor').value,opacity:Number($('poreOpacity').value),labels:$('showPoreLabels').checked});
+  setStatus('3 images saved: '+result.exported_folder);
+});

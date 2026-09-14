@@ -17,7 +17,7 @@ Open http://127.0.0.1:8765. Stop the server with Ctrl+C. Use `--port 8766` if th
 
 1. **Load Image** always opens **New Image**. Import TIF, PNG or JPG (up to 32 MB). Importing an already analyzed file also opens preprocessing; use **Open Analysis** to resume its saved masks.
 2. **Preprocess**: confirm the analysis region and calibration. Measure both ends of the scale bar, enter its physical length, then check **Confirm calibration**. Adjust processing while comparing the original and live preview. **Run Analysis** starts automatic segmentation.
-3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**.
+3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**. **Save Images** opens a folder picker and saves `comparison.png` (original left, segmentation right), `segmentation.png`, and `pores_colored.png`. The original footer is retained; color, opacity, and ID visibility follow the display controls. Only saved pore masks are exported, not pending previews.
 4. **Report**: choose a destination with **Browse…**, then **Generate & Export**. Each export creates a separate folder containing the original file, segmentation and comparison images, measurements, PDF and HTML reports.
 
 ## Processing
@@ -49,7 +49,15 @@ Processing order is normalization → background removal → smoothing. These op
 
 Pore selection is disabled while drawing. Preview masks are applied only when **Add Pore** or **Replace Pore(s)** is clicked. Contained existing pores are replaced when at least 95% of their area lies within a larger new mask. Partial overlaps must be trimmed or resolved before applying.
 
-Cut removes mask pixels along the path. Disconnected pieces become separate pores; the largest retains the original ID. Multi-delete is undone as one operation.
+Cut accepts up to 32 successive drag paths, including intersecting or duplicate paths. The width control applies to all pending cuts. **Apply Cuts (N)** applies their union as one saved edit; disconnected pieces become separate pores and the largest retains the original ID. Ctrl+Z removes the last pending stroke; after applying, it restores the entire cut operation. Clear Input removes all pending cuts. Multi-delete is also undone as one operation.
+
+## Multiple Regions
+
+Draw successive boxes or ellipses to queue them. Switch tools to mix shapes. Finish each polygon with **Enter** or **Finish Region** before drawing the next one. Up to 32 regions can be queued.
+
+**Preview All** processes the regions without adding pores. Select a ready region in the list, inspect its options, then click **Add Pore** (or **Replace Pore(s)**) for that region. The next ready region opens automatically, but still needs its own confirmation. Overlap and containment are recalculated after every addition. **Trim Overlap** remains available.
+
+Queued regions are temporary and clear when switching to selection mode, loading another result, or undoing a saved edit. Each added region is a separate saved edit. Use × to remove a queued region; failed regions can be removed and redrawn.
 
 ## Pore Details
 
@@ -70,6 +78,7 @@ Editing saves mask revisions and updates on-screen measurements without generati
 - Original uploads: `outputs/projects/<image ID>/input/`
 - Automatic masks: `outputs/projects/<image ID>/runs/run_XXXX/`
 - Manual revisions: `outputs/manual_edits/<analysis ID>/revision_XXXX/`
-- Export: a unique folder under the chosen destination with `original/`, `images/`, and `measurements/`
+- Image export: a unique folder containing three PNG images.
+- Report export: a separate unique folder containing PDF and standalone HTML only.
 
 Older reports are regenerated in English on explicit report generation. Existing masks and measurement formulas are unchanged by the UI language. English and Korean branches share local data paths when run from the same checkout.

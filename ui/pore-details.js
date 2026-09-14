@@ -122,11 +122,12 @@
   $('detailsSelectNone').onclick=()=>{selectedIds.clear();allSelected=false;renderTargets();update()};
   window.renderPoreDetails=next=>{
     if(data?.dataset!==next.dataset){allSelected=true;$('detailsTargetSearch').value='';}
+    const previousIds=new Set(data?.candidates.map(row=>row.candidate_id)??[]);
     data=next;const ids=new Set(data.candidates.map(row=>row.candidate_id));
-    selectedIds=allSelected?ids:new Set([...selectedIds].filter(id=>ids.has(id)));
+    selectedIds=allSelected?ids:new Set([...selectedIds].filter(id=>ids.has(id)).concat([...ids].filter(id=>!previousIds.has(id))));
     renderTargets();update();
   };
-  $('openPoreDetails').onclick=()=>{if(!state)return;if(!data||data.dataset!==state.dataset)window.renderPoreDetails(state);if(!dialog.open)dialog.show();update()};
+  $('openPoreDetails').onclick=()=>{if(!state)return;window.renderPoreDetails(state);if(!dialog.open)dialog.show();update()};
   window.closePoreDetails=()=>{if(dialog.open)dialog.close();$('detailsTargetPicker').open=false};
   $('closePoreDetails').onclick=window.closePoreDetails;
   dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();window.closePoreDetails();$('openPoreDetails').focus()}});
