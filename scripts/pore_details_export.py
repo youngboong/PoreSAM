@@ -9,7 +9,7 @@ from analyze_candidates import measure_masks
 
 LABELS={'length_um':'Length (µm)','width_um':'Width (µm)','aspect_ratio':'Aspect ratio',
         'equivalent_diameter_um':'Equivalent diameter (µm)','roundness':'Roundness',
-        'area_um2':'Area (µm²)','circularity':'Circularity','image_area_percent':'Image area (%)'}
+        'area_um2':'Area (µm²)','circularity':'Circularity','image_area_percent':'Area fraction (%)'}
 
 
 def export_plot(state,payload):

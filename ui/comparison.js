@@ -2,27 +2,33 @@
 (() => {
   const original=$('originalImage'),originalContext=original.getContext('2d');
   const left=$('originalViewport'),right=$('viewport');
-  let fill=null,edges=null,numbers=null,lastBase=null,dataset=null,autoFit=true;
+  let supplemental=null,fill=null,edges=null,numbers=null,lastBase=null,dataset=null,autoFit=true;
+  const tintedSupplemental=document.createElement('canvas');
+  window.supplementalColor=()=>{
+    const base=$('poreColor').value;
+    const distance=color=>[1,3,5].reduce((n,i)=>n+(parseInt(base.slice(i,i+2),16)-parseInt(color.slice(i,i+2),16))**2,0);
+    return ['#00cde0','#9654e8','#27c66f'].sort((a,b)=>distance(b)-distance(a))[0];
+  };
   const tintedFill=document.createElement('canvas'),tintedEdges=document.createElement('canvas');
   try{
     const settings=JSON.parse(localStorage.getItem('poreDisplay')||'{}');
     if(/^#[0-9a-f]{6}$/i.test(settings.color))$('poreColor').value=settings.color;
     if(Number.isFinite(settings.opacity)&&settings.opacity>=0&&settings.opacity<=100)$('poreOpacity').value=settings.opacity;
   }catch{}
-  function tint(source,target){
+  function tint(source,target,color=$('poreColor').value){
     target.width=canvas.width;target.height=canvas.height;
     if(!source)return;
     const c=target.getContext('2d');c.drawImage(source,0,0);
-    c.globalCompositeOperation='source-in';c.fillStyle=$('poreColor').value;c.fillRect(0,0,target.width,target.height);
+    c.globalCompositeOperation='source-in';c.fillStyle=color;c.fillRect(0,0,target.width,target.height);
     c.globalCompositeOperation='source-over';
   }
-  function updateColor(){tint(fill,tintedFill);tint(edges,tintedEdges);$('poreLegendDot').style.background=$('poreColor').value;}
+  function updateColor(){tint(supplemental,tintedSupplemental,window.supplementalColor());$('supplementalLegendDot').style.background=window.supplementalColor();tint(fill,tintedFill);tint(edges,tintedEdges);$('poreLegendDot').style.background=$('poreColor').value;}
   function savePreferences(){
     $('poreOpacityValue').textContent=$('poreOpacity').value+'%';
     try{localStorage.setItem('poreDisplay',JSON.stringify({color:$('poreColor').value,opacity:Number($('poreOpacity').value)}))}catch{}
   }
   window.loadComparisonLayers=async data=>{
-    [fill,edges,numbers]=await Promise.all([data.fill_overlay?image(data.fill_overlay):null,data.edge_overlay?image(data.edge_overlay):null,data.label_overlay?image(data.label_overlay):null]);
+    [supplemental,fill,edges,numbers]=await Promise.all([data.supplemental_overlay?image(data.supplemental_overlay):null,data.fill_overlay?image(data.fill_overlay):null,data.edge_overlay?image(data.edge_overlay):null,data.label_overlay?image(data.label_overlay):null]);
     if(dataset!==data.dataset){autoFit=true;left.scrollTo(0,0);right.scrollTo(0,0)}
     dataset=data.dataset;original.width=data.width;original.height=data.height;lastBase=null;
     updateColor();
@@ -36,7 +42,7 @@
   window.drawPoreLayer=context=>{
     if(!$('showOverlay').checked)return;
     if(!fill){if(outlines)context.drawImage(outlines,0,0);return;}
-    context.save();context.globalAlpha=Number($('poreOpacity').value)/100;context.drawImage(tintedFill,0,0);
+    context.save();context.globalAlpha=Number($('poreOpacity').value)/100;context.drawImage(tintedFill,0,0);context.drawImage(tintedSupplemental,0,0);
     context.globalAlpha=1;context.drawImage(tintedEdges,0,0);
     if(numbers&&$('showPoreLabels').checked)context.drawImage(numbers,0,0);
     context.restore();

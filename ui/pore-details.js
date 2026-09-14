@@ -3,9 +3,9 @@
   const metrics=[
     ['length_um','Length (µm)'],['width_um','Width (µm)'],['aspect_ratio','Aspect ratio'],
     ['equivalent_diameter_um','Equivalent diameter (µm)'],['roundness','Roundness'],
-    ['area_um2','Area (µm²)'],['circularity','Circularity'],['image_area_percent','Image area (%)']
+    ['area_um2','Area (µm²)'],['circularity','Circularity'],['image_area_percent','Area fraction (%)']
   ];
-  const tableMetrics=metrics.slice(0,5),labels=Object.fromEntries(metrics);
+  const tableMetrics=[...metrics.slice(0,5),metrics.find(([key])=>key==='image_area_percent')],labels=Object.fromEntries(metrics);
   const format=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString(undefined,{maximumFractionDigits:3,minimumFractionDigits:3});
   let data=null,selectedIds=new Set(),allSelected=true,view='table',points=[],bars=[],plotRows=[],lastPlot=null;
   const selectedRows=()=>data?data.candidates.filter(row=>selectedIds.has(row.candidate_id)):[];
@@ -37,7 +37,7 @@
       row.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey)}};
       fragment.append(row);
     }
-    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=6;cell.textContent='No pores selected.';row.append(cell);fragment.append(row)}
+    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=tableMetrics.length+1;cell.textContent='No pores selected.';row.append(cell);fragment.append(row)}
     $('poreListRows').replaceChildren(fragment);$('poreDetailsStats').replaceChildren(statRows(selectedRows(),tableMetrics));
   }
   function renderTargets(){

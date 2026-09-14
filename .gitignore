@@ -24,3 +24,6 @@ venv/
 .DS_Store
 Thumbs.db
 *.log
+
+# Dataset-specific local experiment (not required to run PoreSAM)
+/scripts/trial_automate.py

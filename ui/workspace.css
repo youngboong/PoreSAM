@@ -105,3 +105,8 @@ button:hover{background:#f0f4f6}button.primary:hover{background:#106a64}button.a
 @media(max-width:1150px){#editorImageName{max-width:150px}.document-toolbar{gap:7px}.document-toolbar input[type=range]{width:55px}.edit-tools{flex-wrap:wrap}.tool-history{margin-left:0}.tool-group{padding:3px 6px}}
 @media(max-width:950px){#editorPanel{height:auto;grid-template-columns:1fr}.setup-grid{grid-template-columns:1fr}.steps{padding:0 8px}.steps button{padding:0 12px;gap:6px}.workspace-panel{padding:16px}.setup-grid>div:first-child{position:static}}
 @media(max-width:600px){.steps button{font-size:11px;padding:0 7px}.upload-zone{padding:45px 15px}.import-panel{padding:16px}.setup-grid>div:first-child{grid-template-columns:1fr}}
+
+.automate-panel{padding:9px}
+#automatePores{background:#f5f2fa;border-color:#c8bfd8;color:#685180;font-weight:400;padding:6px 9px;font-size:12px}
+#automatePores:hover:not(:disabled){background:#ebe5f3;border-color:#b5a7cb}
+#automatePores:focus-visible{outline:2px solid #8c78a8;outline-offset:2px}

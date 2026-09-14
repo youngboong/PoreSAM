@@ -203,6 +203,7 @@ class Editor:
         table['image_area_percent']=table['area_pixels']/(state['gray'].size)*100
         table['source']=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('source','automatic'))
         rgba = np.zeros((*state["gray"].shape,4), dtype=np.uint8)
+        supplemental_rgba=np.zeros_like(rgba)
         fill_rgba=np.zeros_like(rgba)
         edge_rgba=np.zeros_like(rgba)
         label_rgba=np.zeros_like(rgba)
@@ -210,7 +211,10 @@ class Editor:
             contours,_ = cv2.findContours(mask.astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
             color = (255,215,0,255)
             rgba[mask]=(255,215,0,102)
-            fill_rgba[mask]=(255,255,255,255)
+            annotation=state['annotations'].get(str(candidate_id),{})
+            supplemental=annotation.get('supplemental',annotation.get('source') in ['prompted_sam','manual_polygon','automated_sam'])
+            if supplemental:supplemental_rgba[mask]=(255,255,255,255)
+            else:fill_rgba[mask]=(255,255,255,255)
             cv2.drawContours(edge_rgba,contours,-1,(255,255,255,255),1)
             cv2.drawContours(rgba,contours,-1,color,1)
             y,x = np.unravel_index(cv2.distanceTransform(mask.astype(np.uint8),cv2.DIST_L2,3).argmax(),mask.shape)
@@ -225,7 +229,7 @@ class Editor:
         report_url = result_base + '/measurements/index.html' if report_ready else None
         return dict(cut_paths_supported=True,dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
                     image=png_url(Image.fromarray(state["gray"])),overlay=png_url(Image.fromarray(rgba)),
-                    fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
+                    supplemental_overlay=png_url(Image.fromarray(supplemental_rgba)),fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
                     stats=stats, candidates=table.astype(object).where(table.notna(),None).to_dict(orient="records"),can_undo=bool(state["history"]),report_url=report_url,
                     image_url=result_base+'/images/comparison.png' if report_ready else None,result_base=result_base,report_ready=report_ready,
                     export_default_directory=str(ROOT/'outputs/exports'),
@@ -246,7 +250,7 @@ class Editor:
 
     def preview(self,state,payload,polygon=False):
         self.check_revision(state,payload)
-        if payload.get('queue_preview') and len(state.get('queued_previews',{}))>=32:
+        if payload.get('queue_preview') and len(state.get('queued_previews',{}))>=32 and payload.get('replace_queue_token') not in state.get('queued_previews',{}):
             raise ValueError('Preview queue is full. Clear the queue and retry (maximum 32 regions).')
         effective_prompts=None
         if polygon:
@@ -305,6 +309,7 @@ class Editor:
         result=self.preview_masks(state,payload,masks,scores,"manual_polygon" if polygon else "prompted_sam",effective_prompts)
         if payload.get('queue_preview'):
             cached=state['preview']
+            state.setdefault('queued_previews',{}).pop(payload.get('replace_queue_token'),None)
             state.setdefault('queued_previews',{})[result['token']]=dict(
                 masks=[np.packbits(mask) for mask in cached['masks']],
                 scores=[item['score'] for item in result['choices']],
@@ -515,7 +520,7 @@ class Editor:
             del masks[old_id]
             annotations.pop(str(old_id),None)
         masks[target]=mask
-        annotations[str(target)]=dict(source=preview["source"],review_status="user_accepted",prompts=preview["prompts"],
+        annotations[str(target)]=dict(source=preview["source"],supplemental=True,review_status="user_accepted",prompts=preview["prompts"],
                                       replaced_candidate_ids=replaced_ids)
         detail=dict(type="apply",candidate_id=target,source=preview["source"],prompts=preview["prompts"],
                     replaced_candidate_ids=replaced_ids,contained_candidate_ids=contained_ids,
@@ -616,6 +621,13 @@ def make_handler(editor):
                 with editor.lock:
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
+                    elif self.path=='/api/automate-add':
+                        from automate_pores import add_candidate
+                        result=add_candidate(editor,state,payload)
+                    elif self.path=='/api/automate-boxes':
+                        editor.check_revision(state,payload)
+                        from automate_pores import propose_boxes
+                        result=propose_boxes(state)
                     elif self.path=='/api/generate-report': result=editor.generate_report(state,payload)
                     elif self.path=='/api/export-images':
                         editor.check_revision(state,payload)
@@ -647,7 +659,9 @@ def make_handler(editor):
                     elif self.path=='/api/queued-preview': result=editor.queued_preview(state,payload)
                     elif self.path=='/api/clear-preview-queue':
                         editor.check_revision(state,payload)
-                        state['queued_previews']={}
+                        keep=payload.get('keep_tokens',[])
+                        if not isinstance(keep,list) or any(not isinstance(t,str) for t in keep):raise ValueError('Invalid preview tokens.')
+                        state['queued_previews']={k:v for k,v in state.get('queued_previews',{}).items() if k in keep}
                         result=dict(cleared=True)
                     elif self.path in ["/api/apply","/api/delete","/api/undo","/api/resolve-overlaps","/api/cut","/api/merge"]:
                         result=editor.mutate(state,payload,self.path.rsplit("/",1)[1])

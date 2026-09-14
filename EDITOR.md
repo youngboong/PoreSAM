@@ -55,7 +55,7 @@ Cut accepts up to 32 successive drag paths, including intersecting or duplicate 
 
 Draw successive boxes or ellipses to queue them. Switch tools to mix shapes. Finish each polygon with **Enter** or **Finish Region** before drawing the next one. Up to 32 regions can be queued.
 
-**Preview All** processes the regions without adding pores. Select a ready region in the list, inspect its options, then click **Add Pore** (or **Replace Pore(s)**) for that region. The next ready region opens automatically, but still needs its own confirmation. Overlap and containment are recalculated after every addition. **Trim Overlap** remains available.
+**Preview All** processes only new or changed regions without adding pores; unchanged previews are reused. Select a region, place Include/Exclude points, then click **Update Preview** to recompute only that region. Pending points remain attached to their region when selecting another queued region. Select a ready region in the list, inspect its options, then click **Add Pore** (or **Replace Pore(s)**) for that region. The next ready region opens automatically, but still needs its own confirmation. Overlap and containment are recalculated after every addition. **Trim Overlap** remains available.
 
 Queued regions are temporary and clear when switching to selection mode, loading another result, or undoing a saved edit. Each added region is a separate saved edit. Use × to remove a queued region; failed regions can be removed and redrawn.
 
@@ -82,3 +82,9 @@ Editing saves mask revisions and updates on-screen measurements without generati
 - Report export: a separate unique folder containing PDF and standalone HTML only.
 
 Older reports are regenerated in English on explicit report generation. Existing masks and measurement formulas are unchanged by the UI language. English and Korean branches share local data paths when run from the same checkout.
+
+### Automatic box assistance
+
+**Automate** proposes up to 16 boxes around uncovered dark regions and automatically adds candidates passing quality, area, contrast and overlap checks. Existing pores are preserved; small overlaps are trimmed. Added masks are marked unreviewed, appear in measurements immediately, and can be undone one addition at a time. Pending manual drafts are retained.
+
+Supplementary SAM and polygon additions use the **Added** display color. Selection highlighting chooses a different color from both existing and added pores. Comparison and single-color segmentation exports use the chosen common pore color for all pores; the separate per-pore multicolor export remains available.

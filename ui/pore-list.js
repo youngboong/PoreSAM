@@ -3,9 +3,9 @@
   let pickEpoch=0,pickQueue=Promise.resolve(),pendingPicks=0;
   const tinted=document.createElement('canvas');
   function contrastColor(){
-    const base=[1,3,5].map(i=>parseInt($('poreColor').value.slice(i,i+2),16));
-    const distance=color=>[1,3,5].reduce((sum,i,j)=>sum+(parseInt(color.slice(i,i+2),16)-base[j])**2,0);
-    return ['#ff00ff','#00ffff','#ffff00'].sort((a,b)=>distance(b)-distance(a))[0];
+    const colors=[$('poreColor').value,window.supplementalColor?.()??'#00cde0'];
+    const distance=color=>Math.min(...colors.map(base=>[1,3,5].reduce((sum,i)=>sum+(parseInt(color.slice(i,i+2),16)-parseInt(base.slice(i,i+2),16))**2,0)));
+    return ['#ff00ff','#00ffff','#ffff00','#ff5533','#4488ff'].sort((a,b)=>distance(b)-distance(a))[0];
   }
   function selectionRows(){
     document.querySelectorAll('#poreListRows tr[data-id]').forEach(row=>{
