@@ -1,6 +1,5 @@
 # PoreSAM Editor
 
-This guide covers the earlier English browser UI on `english`. The current English Windows desktop app is on the default [app branch](https://github.com/youngboong/PoreSAM/tree/app), and the earlier Korean browser UI remains on [korean](https://github.com/youngboong/PoreSAM/tree/korean). Desktop behavior and recent Automate updates are documented on `app`.
 
 ## Run
 
@@ -81,7 +80,6 @@ Editing saves mask revisions and updates on-screen measurements without generati
 - Image export: a unique folder containing three PNG images.
 - Report export: a separate unique folder containing PDF and standalone HTML only.
 
-Older reports are regenerated in English on explicit report generation. Existing masks and measurement formulas are unchanged by the UI language. English and Korean branches share local data paths when run from the same checkout.
 
 ### Automatic box assistance
 

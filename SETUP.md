@@ -1,6 +1,5 @@
-# English browser environment
+# Environment setup
 
-These instructions apply to the `english` browser branch on Windows PowerShell. For the current Windows desktop app and its separate CPU build environment, use [app / DESKTOP.md](https://github.com/youngboong/PoreSAM/blob/app/DESKTOP.md).
 
 ## CPU
 
