@@ -10,7 +10,7 @@ weights=root/'checkpoints/sam2.1_hiera_small.pt'
 if not weights.is_file():raise SystemExit('Place SAM 2.1 Small at '+str(weights))
 datas=[(str(root/'ui'),'ui'),(str(weights),'checkpoints')]
 datas+=collect_data_files('sam2')+copy_metadata('SAM-2')
-hidden=collect_submodules('sam2')+['automate_pores','box_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
+hidden=collect_submodules('sam2')+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
 a=Analysis([str(root/'scripts/pore_app.py')],pathex=[str(root/'scripts')],binaries=[],datas=datas,hiddenimports=hidden,
            excludes=['IPython','ipykernel','jupyter','notebook','PyQt5','PyQt6','PySide2','PySide6','playwright','pytest','tensorboard'],noarchive=False)
 pyz=PYZ(a.pure)

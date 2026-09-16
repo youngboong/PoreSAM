@@ -11,13 +11,13 @@ PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist\installer
-OutputBaseFilename=PoreSAM-English-Setup-{#AppVersion}
+OutputBaseFilename=PoreSAM-Setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\PoreSAM.exe
 [Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "default"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 [Files]

@@ -26,9 +26,12 @@ python scripts/pore_app.py
 ```
 
 - 기본 장치: CPU.
-- 기본 데이터: `%LOCALAPPDATA%\PoreSAM\English\outputs`.
-- 이 컴퓨터에서는 `C:\Users\YoungJin\AppData\Local\PoreSAM\English\outputs`.
+- 기본 데이터 폴더는 아래 명령으로 확인한다. 이후 이 문서에서는 그 위치를 `<데이터 루트>`라고 쓴다.
 - 설치된 `C:\Users\YoungJin\Documents\PoreSAM\PoreSAM.exe`도 같은 기본 데이터 위치를 사용한다.
+
+```powershell
+python -c "import sys; sys.path.insert(0, 'scripts'); from pore_app import default_data_dir; print(default_data_dir())"
+```
 
 프로젝트의 `outputs`를 사용하려면 명시한다.
 
@@ -36,7 +39,7 @@ python scripts/pore_app.py
 python scripts/pore_app.py --device cpu --data-dir .\outputs
 ```
 
-이미 같은 데이터 위치를 사용하는 앱이 열려 있으면 새 창에는 별도 workspace가 배정된다. 예를 들어 기본 앱의 두 번째 창은 `%LOCALAPPDATA%\PoreSAM\English\outputs_workspaces\workspace_0002\outputs`를 사용한다.
+이미 같은 데이터 위치를 사용하는 앱이 열려 있으면 새 창에는 별도 workspace가 배정된다. 두 번째 창은 `<데이터 루트의 상위 폴더>/outputs_workspaces/workspace_0002/outputs`를 사용한다.
 
 ### 브라우저 UI
 
@@ -263,7 +266,7 @@ print(len(result["boxes"]), out.resolve())
 
 | 실행 방법 | 데이터 루트 |
 |---|---|
-| 설치 EXE / 기본 `pore_app.py` | `%LOCALAPPDATA%\PoreSAM\English\outputs` |
+| 설치 EXE / 기본 `pore_app.py` | 위 `default_data_dir()` 명령으로 확인한 폴더 |
 | `pore_app.py --data-dir .\outputs` | 프로젝트의 `outputs` (첫 창) |
 | `pore_editor.py` | 프로젝트의 `outputs` (환경변수 `PORESAM_DATA_DIR` 미설정 시) |
 | `segment_first_pass.py --output ...` | 직접 지정한 결과 폴더 |
@@ -301,19 +304,19 @@ print(len(result["boxes"]), out.resolve())
 - **Save Images:** `<선택 폴더>/<이미지명>_images_revision_NNNN_<시각>_<식별자>/`에 `comparison.png`, `segmentation.png`, `pores_colored.png`. 기존 하단 정보 영역을 포함하며, 비교 이미지는 원본 표시와 segmentation을 나란히 붙인다. 원본 파일 자체는 프로젝트의 `input/original.*`에 있다.
 - **Generate Report:** `<선택 폴더>/<이미지명>_report_revision_NNNN_<시각>_<식별자>/`에 `report.pdf`, `report.html`만 내보낸다. 내부 `measurements`의 CSV 등은 데이터 루트에 남는다.
 - **Pore Details의 CSV·그림 저장:** Windows 저장 대화상자에서 선택한 파일 경로.
-- 데스크톱 로그: 기본 실행 시 `%LOCALAPPDATA%\PoreSAM\English\logs/desktop.log`, `console.log`. 별도 데이터 경로는 그 데이터 폴더의 상위 `logs/`를 사용한다.
+- 데스크톱 로그: `<데이터 루트의 상위 폴더>/logs/desktop.log`, `console.log`.
 
-## 8. 검증·실험용 파일 구분
+## 8. 핵심 검증
 
-`check_*.py`, `test_*.py`는 기능 검증용이다. 일반 분석을 위해 순서대로 실행할 필요가 없다. `trial_*.py` 및 `fiber_pores.py`, `repair_struts.py` 등은 과거 실험·별도 처리용 코드이며, 파일이 존재한다고 현재 UI가 해당 방식을 자동으로 선택하는 것은 아니다. `box_pores.py`의 다중 pore 탐색도 현재 수동 박스 UI의 기본 경로는 아니다.
+`scripts/`에는 앱 실행·분석·환경 확인에 필요한 파일만 있다. 핵심 회귀 검증은 `tests/`에 있으며, 일반 분석을 위해 실행할 필요는 없다. 사용하지 않는 실험 및 진단 코드는 제거했다.
 
 Automate 회귀 검증 예시(Playwright가 설치된 개발 환경 필요):
 
 ```powershell
-conda activate pore
-python scripts/check_automate_merge.py
+python -m pip install playwright==1.62.0
+python tests/check_automate_merge.py
 ```
 
 출력: `outputs/ui_checks/automate_merge_<시각>/verification.json`. 누락 탐색 32개 상한, 점수 기준, 병합·trim·수동 Cut 보호·Undo·Stop 동작을 검사한다.
 
-데스크톱 검증은 보통 `outputs/desktop_checks/`, 성능 검증은 `outputs/performance/`, 개별 실험은 각 스크립트가 지정한 하위 폴더에 저장된다. `argparse`를 사용하는 실행 파일은 `python scripts/<파일>.py --help`로 옵션을 확인할 수 있다. 일부 검증 파일은 옵션 없이 바로 실행되므로 먼저 파일의 `main()`을 확인한다.
+데스크톱 검증은 `outputs/desktop_checks/`, UI 회귀 검증은 `outputs/ui_checks/`에 저장된다. [tests/README.md](tests/README.md)에 실행 명령을 정리했다.

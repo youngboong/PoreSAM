@@ -1,6 +1,6 @@
 # PoreSAM Editor
 
-English Windows desktop UI on the default `app` branch. Earlier browser editions remain on `english` and `korean`; their features and export behavior differ from this branch.
+Pore segmentation, editing and measurement in the Windows app.
 
 ## Run
 
@@ -77,14 +77,14 @@ Measurement formulas are available in the collapsed **Measurement Definitions** 
 
 Editing saves mask revisions and updates on-screen measurements without generating reports. Report generation happens only in step 4.
 
-- Default desktop data root: `%LOCALAPPDATA%/PoreSAM/English/outputs`; override with `--data-dir`.
+- Default desktop data root: print it using the command in [DESKTOP.md](DESKTOP.md), or override with `--data-dir`.
 - Original uploads: `<data root>/projects/<image ID>/input/`
 - Automatic masks: `<data root>/projects/<image ID>/runs/run_XXXX/`
 - Manual revisions: `<data root>/manual_edits/<analysis ID>/revision_XXXX/`
 - Image export: a unique folder containing three PNG images.
 - Report export: a separate unique folder containing PDF and standalone HTML only.
 
-Older reports are regenerated in English on explicit report generation. The desktop default data root differs from the browser edition's project-local `outputs`. Additional desktop windows receive separate workspace directories. See [SCRIPTS_GUIDE.md](SCRIPTS_GUIDE.md) for complete paths and Python examples.
+Older reports are refreshed on explicit report generation. The desktop default data root differs from the browser edition's project-local `outputs`. Additional desktop windows receive separate workspace directories. See [SCRIPTS_GUIDE.md](SCRIPTS_GUIDE.md) for complete paths and Python examples.
 
 ### Automatic box assistance
 

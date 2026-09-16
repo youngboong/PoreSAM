@@ -25,9 +25,6 @@ venv/
 Thumbs.db
 *.log
 
-# Dataset-specific local experiment (not required to run PoreSAM)
-/scripts/trial_automate.py
-
 # Desktop build artifacts (never include local analyses in installers)
 /build/
 /dist/

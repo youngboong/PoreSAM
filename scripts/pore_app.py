@@ -1,4 +1,4 @@
-"""PoreSAM English desktop entry point (Windows / WebView2)."""
+"""PoreSAM desktop entry point (Windows / WebView2)."""
 import argparse
 import ctypes
 import hashlib
@@ -42,7 +42,7 @@ def acquire_workspace(base):
 
 
 def main():
-    parser=argparse.ArgumentParser(description='PoreSAM English for Windows')
+    parser=argparse.ArgumentParser(description='PoreSAM for Windows')
     parser.add_argument('--device',choices=['cpu','auto','cuda'],default='cpu')
     parser.add_argument('--data-dir',type=Path,default=default_data_dir())
     parser.add_argument('--checkpoint',type=Path)

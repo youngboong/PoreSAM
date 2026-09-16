@@ -1,4 +1,8 @@
 """Shape metrics and modeless details/plots, using isolated synthetic masks."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import io
 import json
 import threading
@@ -12,7 +16,7 @@ from pore_editor import Editor,ROOT,make_handler,save_images
 
 
 def main():
-    run=ROOT/'outputs/ui_checks'/('incremental_preview_'+time.strftime('%Y%m%d_%H%M%S'));run.mkdir(parents=True)
+    run=ROOT/'outputs/ui_checks'/('region_queue_'+time.strftime('%Y%m%d_%H%M%S'));run.mkdir(parents=True)
     yy,xx=np.mgrid[:400,:400]
     circle=(xx-90)**2+(yy-90)**2<=40**2
     ellipse=((xx-260)/70)**2+((yy-90)/30)**2<=1
@@ -40,9 +44,8 @@ def main():
     server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(editor));threading.Thread(target=server.serve_forever,daemon=True).start();errors=[]
     # Deterministic SAM stand-in: exercise box/ellipse prompt plumbing without loading a model.
     class Predictor:
-        calls=0
+        model=None
         def predict(self,point_coords,point_labels,box,multimask_output):
-            self.calls+=1
             mask=np.zeros((400,400),bool)
             x0,y0,x1,y1=np.rint(box).astype(int);mask[y0:y1+1,x0:x1+1]=True
             return np.array([mask]),np.array([1.]),None
@@ -58,39 +61,42 @@ def main():
             def drag(x0,y0,x1,y1):
                 page.mouse.move(*point(x0,y0));page.mouse.down();page.mouse.move(*point(x1,y1),steps=5);page.mouse.up()
             page.locator('[data-mode=box]').click();drag(50,200,100,250);drag(120,200,170,250)
+            assert page.evaluate('queuedRegions.length')==1
+            page.locator('[data-mode=ellipse]').click();drag(220,220,280,280)
+            page.locator('[data-mode=polygon]').click()
+            for x,y in [(300,240),(350,240),(350,300),(300,300)]:page.mouse.click(*point(x,y))
+            page.keyboard.press('Enter')
+            assert page.evaluate('queuedRegions.length')==4
             page.locator('#predict').click();page.wait_for_function("!busy && queuedRegions.every(r=>r.status==='Ready')")
-            assert editor.predictor.calls==2
-            tokens=page.evaluate('queuedRegions.map(r=>r.token)')
-            page.locator('[data-mode=positive]').click();page.mouse.click(*point(70,220))
-            assert page.locator('#apply').is_disabled()
-            page.locator('#updateRegionPreview').click();page.wait_for_function("!busy && preview")
-            assert editor.predictor.calls==3
-            assert page.evaluate('queuedRegions[1].token')==tokens[1]
-            assert page.evaluate('queuedRegions[0].input.labels')==[1]
-            assert len(editor.state(dataset)['queued_previews'])==2
-            page.locator('#predict').click();page.wait_for_function('!busy')
-            assert editor.predictor.calls==3
-            # Keep unsubmitted points with their own region when switching.
-            page.locator('[data-mode=negative]').click();page.mouse.click(*point(40,190))
-            page.locator('#regionQueueList .queued-region').nth(1).locator('button').first.click();page.wait_for_function('!busy')
-            assert page.evaluate('queuedRegions[0].input.labels')==[1,0]
-            assert page.evaluate('points.length')==0
-            page.mouse.click(*point(110,190))
-            page.locator('#updateRegionPreview').click();page.wait_for_function('!busy')
-            assert editor.predictor.calls==4
-            assert page.evaluate('queuedRegions[1].input.labels')==[0]
-            page.locator('#predict').click();page.wait_for_function('!busy')
-            assert editor.predictor.calls==5
             assert page.evaluate('state.revision')==0
-            page.locator('#apply').click();page.wait_for_function('!busy && state.revision===1')
-            assert page.evaluate('state.candidates.length')==5
-            assert editor.predictor.calls==5
-            page.locator('#apply').click();page.wait_for_function('!busy && state.revision===2')
-            assert page.evaluate('state.candidates.length')==6
-            assert editor.predictor.calls==5
+            assert page.evaluate('state.candidates.length')==4
+            page.keyboard.press('Control+z')
+            assert page.evaluate('state.revision')==0
+            page.locator('#predict').click();page.wait_for_function("!busy && queuedRegions.length===4 && queuedRegions.every(r=>r.status==='Ready')")
+            page.screenshot(path=str(run/'review_queue.png'))
+            # Review out of order; no queued region is applied without its own click.
+            page.locator('#regionQueueList .queued-region').nth(3).locator('button').first.click();page.wait_for_function('!busy')
+            for revision in range(1,5):
+                page.locator('#apply').click();page.wait_for_function('(r)=>!busy && state.revision===r',arg=revision)
+                assert page.evaluate('state.candidates.length')==4+revision
+                assert page.evaluate("queuedRegions.filter(r=>r.status==='Added').length")==revision
+                assert not page.evaluate('state.report_ready')
+            page.keyboard.press('Control+z');page.wait_for_function('!busy && state.revision===5')
+            assert page.evaluate('state.candidates.length')==7
+            # Two mutually overlapping drafts: applying the first blocks the second.
+            page.locator('[data-mode=box]').click();drag(40,310,110,360);drag(90,310,150,360)
+            page.locator('#predict').click();page.wait_for_function("!busy && queuedRegions.length===2 && queuedRegions.every(r=>r.status==='Ready')")
+            page.locator('#apply').click();page.wait_for_function('!busy && state.revision===6')
+            assert page.locator('#apply').is_disabled() and page.locator('#trimOverlap').is_visible()
+            page.locator('#trimOverlap').click();page.wait_for_function('!busy')
+            page.locator('#apply').click();page.wait_for_function('!busy && state.revision===7')
+            assert editor.response(editor.state(dataset))['stats']['overlap_pixels']==0
+            # A failed region must not prevent the other regions from being reviewed.
+            page.locator('#clear').click();drag(300,320,301,350);drag(310,320,350,350)
+            page.locator('#predict').click();page.wait_for_function("!busy && queuedRegions.length===2 && queuedRegions[0].status==='Failed' && queuedRegions[1].status==='Ready'")
+            assert page.evaluate('state.revision')==7
             assert not errors,errors
-            page.screenshot(path=str(run/'incremental_preview.png'))
-            print('PASS: 2 initial predictions; one per edited region; unchanged previews reused; points stay with their region; individual Add; bounded cache')
+            print('PASS: mixed region queue, out-of-order review, individual saves, undo, overlap refresh and trimming')
             print(run)
             browser.close()
     finally:server.shutdown()

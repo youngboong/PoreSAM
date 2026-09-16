@@ -24,7 +24,6 @@ from analyze_candidates import measure_masks, export_folder, current_report_exis
 from segment_first_pass import overlay
 from result_paths import read_artifact
 from project_workflow import ProjectWorkflow
-from large_pore_search import LargePoreSearch
 from pore_overlap import exclusive_existing,overlap_pixels
 from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
@@ -109,7 +108,6 @@ class Editor:
         self.automate_lock = threading.Lock()
         self.automate_stops = {}
         self.workflow = ProjectWorkflow(self, project_root or (self.output_root.parent/'projects'), save_images)
-        self.large_search = LargePoreSearch(self, self.output_root.parent/'large_pore_search')
 
     def baseline(self, dataset):
         if dataset in DATASETS: return self.output_root.parent/f'{dataset}_first_pass'
@@ -558,15 +556,12 @@ def make_handler(editor):
                 end=source.index('</dialog>',start)+len('</dialog>')
                 page=(ROOT/'ui/details-window.html').read_text(encoding='utf-8').replace('<!--PORE_DETAILS_DIALOG-->',source[start:end])
                 return self.send(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            if path in ['/workspace.js','/workspace.css','/trials.js','/large-pores.js','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js','/details-window.js']:
+            if path in ['/workspace.js','/workspace.css','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js','/details-window.js']:
                 return self.send(200,(ROOT/'ui'/path[1:]).read_bytes(),'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
             if path=="/api/datasets": return self.send(200,editor.datasets())
             if path=="/api/projects": return self.send(200,dict(projects=editor.workflow.list_projects()))
             if path=='/api/images': return self.send(200,dict(images=editor.image_library()))
-            if path=='/api/trials':
-                folders=sorted((editor.output_root.parent/'generalization_trial').glob('*/report.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
-                return self.send(200,dict(trials=[dict(name=p.parent.name,url=f'/trial-files/{p.parent.name}/index.html') for p in folders]))
-            if path.startswith(("/files/","/project-files/","/baseline-files/","/trial-files/")):
+            if path.startswith(("/files/","/project-files/","/baseline-files/")):
                 if path.startswith('/baseline-files/'):
                     parts=path[len('/baseline-files/'):].split('/',1)
                     if len(parts)!=2: return self.send(404,dict(error='File not found'))
@@ -576,9 +571,6 @@ def make_handler(editor):
                 elif path.startswith('/project-files/'):
                     root=editor.workflow.root
                     relative=path[len('/project-files/'):]
-                elif path.startswith('/trial-files/'):
-                    root=editor.output_root.parent/'generalization_trial'
-                    relative=path[len('/trial-files/'):]
                 else:
                     root=editor.output_root
                     relative=path[len('/files/'):]
@@ -630,7 +622,6 @@ def make_handler(editor):
                             if not operation['complete']:operation['stop'].set()
                             if self.path=='/api/finish-automate':editor.automate_stops.pop(token,None)
                         return self.send(200,dict(stopped=True))
-                if self.path=='/api/large-job': return self.send(200,editor.large_search.status(payload.get('job_id')))
                 if self.path=='/api/import-existing':
                     dataset=payload.get('dataset')
                     # Existing uploaded images retain their original source and run history.
@@ -703,14 +694,8 @@ def make_handler(editor):
                         for candidate_id in ids:mask|=state['masks'][candidate_id]
                         rgba=np.zeros((*mask.shape,4),np.uint8);rgba[mask]=(255,255,255,255)
                         result=dict(image=png_url(Image.fromarray(rgba)),candidate_ids=ids,candidate_id=ids[0] if len(ids)==1 else None)
-                    elif self.path=='/api/large-search': result=editor.large_search.start(state,payload)
-                    elif self.path=='/api/large-overview': result=editor.large_search.overview(state,payload)
-                    elif self.path=='/api/large-pick': result=editor.large_search.pick(state,payload)
                     elif self.path in ["/api/predict","/api/polygon"]:
                         result=editor.preview(state,payload,self.path.endswith("polygon"))
-                    elif self.path=='/api/box-pores':
-                        from box_pores import preview_box
-                        result=preview_box(editor,state,payload)
                     elif self.path=='/api/trim-preview-overlap':
                         result=editor.trim_preview_overlap(state,payload)
                     elif self.path=='/api/queued-preview': result=editor.queued_preview(state,payload)

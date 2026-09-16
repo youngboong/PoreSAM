@@ -1,4 +1,8 @@
 """Device selection must not initialize CUDA when CPU is requested."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import unittest
 from unittest.mock import patch
 import torch

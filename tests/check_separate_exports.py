@@ -1,4 +1,8 @@
 """Shape metrics and modeless details/plots, using isolated synthetic masks."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import io
 import json
 import threading
@@ -12,7 +16,7 @@ from pore_editor import Editor,ROOT,make_handler,save_images
 
 
 def main():
-    run=ROOT/'outputs/ui_checks'/('merge_'+time.strftime('%Y%m%d_%H%M%S'));run.mkdir(parents=True)
+    run=ROOT/'outputs/ui_checks'/('separate_exports_'+time.strftime('%Y%m%d_%H%M%S'));run.mkdir(parents=True)
     yy,xx=np.mgrid[:400,:400]
     circle=(xx-90)**2+(yy-90)**2<=40**2
     ellipse=((xx-260)/70)**2+((yy-90)/30)**2<=1
@@ -32,7 +36,7 @@ def main():
     degenerate=measure_masks([(1,single)],single.shape,1)[0].iloc[0]
     assert degenerate.aspect_ratio is None and degenerate.roundness is None
     editor=Editor(run/'edits',run/'projects');gray=np.full(circle.shape,180,np.uint8);gray[circle|ellipse|left|bottom]=40
-    stream=io.BytesIO();Image.fromarray(gray).save(stream,format='PNG');project=editor.workflow.upload('shapes.png',stream.getvalue())
+    stream=io.BytesIO();Image.fromarray(np.vstack([gray,np.full((40,400),91,np.uint8)])).save(stream,format='PNG');project=editor.workflow.upload('shapes.png',stream.getvalue())
     folder=editor.workflow.root/project['id']/'runs/run_0001';folder.mkdir(parents=True)
     report=dict(image=str(editor.workflow.root/project['id']/'input/normalized.png'),analysis_bottom_exclusive=400,entrance_candidate_count=4,scale=dict(um_per_pixel=.5,label_um=50,length_pixels=100),overlay_relative_path='images/entrance_candidates_overlay.png')
     (folder/'report.json').write_text(json.dumps(report));np.savez_compressed(folder/'entrance_candidates.npz',**{f'candidate_{i}':m for i,m in masks.items()});save_images(folder,gray,masks);export_folder(folder)
@@ -44,39 +48,33 @@ def main():
             page=browser.new_page(viewport=dict(width=1700,height=1100));page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.server_port}')
             page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
-            page.locator('[data-mode=select]').click()
-            assert page.locator('#mergePores').is_disabled()
-            page.evaluate('window.selectPoreFromDetails(1)')
-            assert page.locator('#mergePores').is_disabled()
-            page.evaluate('window.selectPoreFromDetails(2,true)')
-            page.wait_for_function("!document.getElementById('mergePores').disabled")
-            page.locator('#mergePores').click()
-            page.wait_for_function('!busy && state.revision===1')
-            actual=editor.state(dataset)
-            assert set(actual['masks'])=={1,3,4}
-            assert np.array_equal(actual['masks'][1],circle|ellipse)
-            assert all(np.array_equal(actual['masks'][i],masks[i]) for i in [3,4])
-            row=page.evaluate('state.candidates.find(c=>c.candidate_id===1)')
-            assert abs(row['area_um2']-float((circle|ellipse).sum())*.25)<1e-6
-            assert not page.evaluate('state.report_ready')
-            page.screenshot(path=str(run/'merged.png'))
+            directory=run/'exported'
+            page.route('**/api/choose-export-folder',lambda route:route.fulfill(json={'directory':str(directory)}))
+            page.locator('#saveEditorImages').click();page.wait_for_function('!busy && document.getElementById("status").textContent.startsWith("3 images saved:")')
+            exported=next(directory.glob('*_images_*'))
+            assert {p.name for p in exported.iterdir()}=={'comparison.png','segmentation.png','pores_colored.png'}
+            org=np.array(Image.open(editor.workflow.root/project['id']/'input/normalized.png').convert('RGB'))
+            for name in ['segmentation.png','pores_colored.png']:
+                pixels=np.array(Image.open(exported/name));assert pixels.shape==org.shape
+                assert np.array_equal(pixels[400:],org[400:])
+                assert not np.array_equal(pixels[:400],org[:400])
+            comparison=np.array(Image.open(exported/'comparison.png'))
+            assert comparison.shape==(440,800,3) and np.array_equal(comparison[:,:400],org)
+            assert np.array_equal(comparison[:,400:],np.array(Image.open(exported/'segmentation.png')))
+            assert not np.array_equal(np.array(Image.open(exported/'segmentation.png')),np.array(Image.open(exported/'pores_colored.png')))
+            assert page.evaluate('state.revision')==0
             page.locator('[data-panel=analysis]').click()
-            page.keyboard.press('Control+z')
-            page.wait_for_function('!busy && state.revision===2')
-            assert page.locator('#editorPanel').is_visible()
-            assert set(actual['masks'])==set(masks)
-            assert all(np.array_equal(actual['masks'][i],masks[i]) for i in masks)
-            for ids in [[],[1],[1,999],[1,1]]:
-                try:editor.mutate(actual,dict(revision=2,target_ids=ids),'merge')
-                except ValueError:pass
-                else:raise AssertionError('Invalid selection accepted')
-                assert actual['revision']==2
-            try:editor.mutate(actual,dict(revision=1,target_ids=[1,2]),'merge')
-            except ValueError:pass
-            else:raise AssertionError('Stale revision accepted')
+            page.locator('#chooseExportDirectory').click();page.wait_for_function('!busy')
+            page.locator('#generateReport').click();page.wait_for_function('!busy && document.getElementById("exportResult").textContent.startsWith("Exported to:")')
+            reports=next(directory.glob('*_report_*'))
+            assert {p.name for p in reports.iterdir()}=={'report.pdf','report.html'}
+            html=(reports/'report.html').read_text(encoding='utf-8')
+            assert html.count('src="data:image/png;base64,')==2
+            assert 'href="candidates.csv"' not in html and 'href="report.pdf"' in html
+            assert page.evaluate('state.revision')==0
             assert not errors,errors
-            print('PASS: merge UI, exact union, measurements, unchanged other pores, undo, invalid/stale requests')
-            print(run)
+            print('PASS: Save Images + native picker wiring, exactly three images, original footer, unchanged masks, report-only PDF/standalone HTML')
+            print(exported);print(reports)
             browser.close()
     finally:server.shutdown()
 

@@ -1,4 +1,8 @@
 """Small numerical checks for units, overlaps, edge policy, and empty results."""
+
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 import unittest
 import numpy as np
 from analyze_candidates import measure_masks, histogram_table
