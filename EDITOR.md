@@ -1,6 +1,5 @@
 # Pore Editor
 
-이 문서는 `korean` 브랜치의 한국어 브라우저판을 설명합니다. 최신 영어 Windows 앱은 기본 [app 브랜치](https://github.com/youngboong/PoreSAM/tree/app), 기존 영어 브라우저판은 [english 브랜치](https://github.com/youngboong/PoreSAM/tree/english)에 있습니다. 아래의 결과 묶음 저장 방식과 팝업 동작은 이 한국어판 기준입니다.
 
 **1. 불러오기 → 2. 전처리 → 3. 결과 분석 → 4. 결과 보고서** 순서로 사용합니다.
 
