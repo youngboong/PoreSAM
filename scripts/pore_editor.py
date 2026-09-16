@@ -30,7 +30,8 @@ from sam2.build_sam import build_sam2
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from sam_runtime import configure_device, inference_context
 
-ROOT = Path(__file__).resolve().parents[1]
+from app_paths import ASSET_ROOT, output_root as default_output_root, checkpoint_path
+ROOT = ASSET_ROOT
 DATASETS = ["PI35_5kx-4_bse", "PI35_2kx-4_BSE8", "PI100_2kx_bse"]
 CONTAINMENT_THRESHOLD = .95
 
@@ -100,16 +101,18 @@ def save_images(folder,gray,masks):
 class Editor:
     def __init__(self, output_root=None, project_root=None, device='auto'):
         self.device = configure_device(device)
-        self.output_root = Path(output_root or ROOT / "outputs" / "manual_edits")
+        self.output_root = Path(output_root or default_output_root() / "manual_edits")
         self.states = {}
         self.predictor = None
         self.encoded_dataset = None
         self.lock = threading.RLock()
+        self.automate_lock = threading.Lock()
+        self.automate_stops = {}
         self.workflow = ProjectWorkflow(self, project_root or (self.output_root.parent/'projects'), save_images)
         self.large_search = LargePoreSearch(self, self.output_root.parent/'large_pore_search')
 
     def baseline(self, dataset):
-        if dataset in DATASETS: return ROOT/'outputs'/f'{dataset}_first_pass'
+        if dataset in DATASETS: return self.output_root.parent/f'{dataset}_first_pass'
         datasets = self.workflow.datasets()
         if dataset not in datasets: raise ValueError('Image not found.')
         return datasets[dataset][0]
@@ -232,7 +235,7 @@ class Editor:
                     supplemental_overlay=png_url(Image.fromarray(supplemental_rgba)),fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
                     stats=stats, candidates=table.astype(object).where(table.notna(),None).to_dict(orient="records"),can_undo=bool(state["history"]),report_url=report_url,
                     image_url=result_base+'/images/comparison.png' if report_ready else None,result_base=result_base,report_ready=report_ready,
-                    export_default_directory=str(ROOT/'outputs/exports'),
+                    export_default_directory=str(self.output_root.parent/'exports'),
                     selection_settings=state['report'].get('selection_settings',dict(min_contrast=8,min_area_pixels=100)),
                     saved_folder=str(self.revision_folder(state["dataset"],state["revision"])) if state["revision"] else None)
 
@@ -295,7 +298,7 @@ class Editor:
                 effective_prompts=dict(box=box.tolist(),points=coords.tolist(),labels=labels)
             with inference_context(self.device):
                 if self.predictor is None:
-                    model=build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml",str(ROOT/"checkpoints/sam2.1_hiera_small.pt"),device=self.device,apply_postprocessing=False)
+                    model=build_sam2("configs/sam2.1/sam2.1_hiera_s.yaml",str(checkpoint_path()),device=self.device,apply_postprocessing=False)
                     self.predictor=SAM2ImagePredictor(model)
                 if self.encoded_dataset!=state["dataset"]:
                     self.predictor.set_image(cv2.cvtColor(state.get('sam_gray',state['gray']),cv2.COLOR_GRAY2RGB))
@@ -378,7 +381,7 @@ class Editor:
         result.update(trimmed_overlap_pixels=removed,split_count=count)
         return result
 
-    def save(self,state,masks,annotations,history,next_id,action):
+    def save(self,state,masks,annotations,history,next_id,action,publish_guard=None):
         # Old saved analyses may already share boundary pixels. Resolve only on a new save,
         # record every changed ID, and keep undo's exact historical snapshot intact.
         if action.get('type')!='undo':
@@ -407,8 +410,10 @@ class Editor:
         # Publish durable masks and history immediately; reports are explicitly requested later.
         pending=parent/"latest.pending.json"
         pending.write_text(json.dumps(dict(revision=revision)),encoding="utf-8")
-        pending.replace(parent/"latest.json")
-        state.update(masks=masks,annotations=annotations,history=history,next_id=next_id,revision=revision,preview=None)
+        from contextlib import nullcontext
+        with publish_guard() if publish_guard else nullcontext():
+            pending.replace(parent/"latest.json")
+            state.update(masks=masks,annotations=annotations,history=history,next_id=next_id,revision=revision,preview=None)
         return self.response(state)
 
     def generate_report(self,state,payload):
@@ -547,13 +552,19 @@ def make_handler(editor):
             path=unquote(urlsplit(self.path).path)
             if path=="/":
                 return self.send(200,(ROOT/"ui/editor.html").read_bytes(),"text/html; charset=utf-8")
-            if path in ['/workspace.js','/workspace.css','/trials.js','/large-pores.js','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js']:
+            if path=='/pore-details-window':
+                source=(ROOT/'ui/editor.html').read_text(encoding='utf-8')
+                start=source.index('<dialog id="poreDetailsDialog"')
+                end=source.index('</dialog>',start)+len('</dialog>')
+                page=(ROOT/'ui/details-window.html').read_text(encoding='utf-8').replace('<!--PORE_DETAILS_DIALOG-->',source[start:end])
+                return self.send(200,page.encode('utf-8'),'text/html; charset=utf-8')
+            if path in ['/workspace.js','/workspace.css','/trials.js','/large-pores.js','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js','/details-window.js']:
                 return self.send(200,(ROOT/'ui'/path[1:]).read_bytes(),'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
             if path=="/api/datasets": return self.send(200,editor.datasets())
             if path=="/api/projects": return self.send(200,dict(projects=editor.workflow.list_projects()))
             if path=='/api/images': return self.send(200,dict(images=editor.image_library()))
             if path=='/api/trials':
-                folders=sorted((ROOT/'outputs/generalization_trial').glob('*/report.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
+                folders=sorted((editor.output_root.parent/'generalization_trial').glob('*/report.json'),key=lambda p:p.stat().st_mtime_ns,reverse=True)
                 return self.send(200,dict(trials=[dict(name=p.parent.name,url=f'/trial-files/{p.parent.name}/index.html') for p in folders]))
             if path.startswith(("/files/","/project-files/","/baseline-files/","/trial-files/")):
                 if path.startswith('/baseline-files/'):
@@ -566,7 +577,7 @@ def make_handler(editor):
                     root=editor.workflow.root
                     relative=path[len('/project-files/'):]
                 elif path.startswith('/trial-files/'):
-                    root=ROOT/'outputs/generalization_trial'
+                    root=editor.output_root.parent/'generalization_trial'
                     relative=path[len('/trial-files/'):]
                 else:
                     root=editor.output_root
@@ -589,6 +600,8 @@ def make_handler(editor):
                 if not 0<length<limit: raise ValueError("Input is too large.")
                 payload=json.loads(self.rfile.read(length))
                 if self.path=='/api/choose-export-folder':
+                    if getattr(editor,'folder_picker',None):
+                        return self.send(200,dict(directory=editor.folder_picker()))
                     import subprocess,sys
                     picker="import tkinter as tk; from tkinter import filedialog; r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True); p=filedialog.askdirectory(title='PoreSAM - Select export folder',parent=r); print(p,flush=True); r.destroy()"
                     selected=subprocess.run([sys.executable,'-c',picker],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
@@ -602,6 +615,21 @@ def make_handler(editor):
                 if self.path=='/api/preprocess-preview': return self.send(200,editor.workflow.preview_preprocessing(payload.get('project_id'),payload.get('config',{})))
                 if self.path=='/api/analyze': return self.send(200,editor.workflow.start(payload.get('project_id'),payload.get('config',{})))
                 if self.path=='/api/job': return self.send(200,editor.workflow.status(payload.get('job_id')))
+                if self.path=='/api/stop-analysis': return self.send(200,editor.workflow.cancel(payload.get('job_id')))
+                if self.path in ['/api/start-automate','/api/stop-automate','/api/finish-automate']:
+                    # Never wait for the model's editor.lock to request a stop.
+                    with editor.automate_lock:
+                        if self.path=='/api/start-automate':
+                            if editor.automate_stops: raise ValueError('Automate is already running.')
+                            token=secrets.token_hex(12)
+                            editor.automate_stops[token]=dict(dataset=payload.get('dataset'),revision=payload.get('revision'),stop=threading.Event(),working=None,complete=False)
+                            return self.send(200,dict(operation_id=token))
+                        token=payload.get('operation_id')
+                        operation=editor.automate_stops.get(token)
+                        if operation:
+                            if not operation['complete']:operation['stop'].set()
+                            if self.path=='/api/finish-automate':editor.automate_stops.pop(token,None)
+                        return self.send(200,dict(stopped=True))
                 if self.path=='/api/large-job': return self.send(200,editor.large_search.status(payload.get('job_id')))
                 if self.path=='/api/import-existing':
                     dataset=payload.get('dataset')
@@ -621,9 +649,35 @@ def make_handler(editor):
                 with editor.lock:
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
-                    elif self.path=='/api/automate-add':
-                        from automate_pores import add_candidate
-                        result=add_candidate(editor,state,payload)
+                    elif self.path in ['/api/automate-add','/api/commit-automate']:
+                        from automate_pores import add_candidate,consolidation_boxes
+                        from operation_cancel import OperationCancelled, check_stop, publish_operation
+                        with editor.automate_lock:
+                            operation=editor.automate_stops.get(payload.get('operation_id'))
+                        if not operation or operation['dataset']!=payload.get('dataset') or operation['complete']:
+                            raise ValueError('Automate operation has ended.')
+                        editor.check_revision(state,dict(revision=operation['revision']))
+                        try:
+                            check_stop(operation['stop'])
+                            if operation['working'] is None:
+                                operation['working']=copy.deepcopy(state)
+                                operation['working']['automate_review_boxes']=[]
+                            working=operation['working']
+                            if self.path=='/api/automate-add':
+                                result=add_candidate(editor,working,payload,operation['stop'],staged=True)
+                            else:
+                                for group in consolidation_boxes(working):
+                                    check_stop(operation['stop'])
+                                    merged=add_candidate(editor,working,dict(group,revision=working['revision']),operation['stop'],staged=True)
+                                    if merged.get('cancelled'):check_stop(operation['stop'])
+                                added_ids=sorted(set(working['masks'])-set(state['masks']))
+                                changed_ids=sorted(i for i in set(working['masks'])&set(state['masks']) if not np.array_equal(working['masks'][i],state['masks'][i]))
+                                removed_ids=sorted(set(state['masks'])-set(working['masks']))
+                                result=dict(committed=True,added_count=len(added_ids),merged_count=len(changed_ids),review_boxes=working.get('automate_review_boxes',[]))
+                                if added_ids or changed_ids or removed_ids:
+                                    result['state']=editor.save(state,working['masks'],working['annotations'],state['history']+[state['revision']],working['next_id'],dict(type='automate',candidate_ids=added_ids,updated_ids=changed_ids,removed_ids=removed_ids,review_boxes=result['review_boxes']),publish_guard=lambda:publish_operation(operation,editor.automate_lock))
+                        except OperationCancelled:
+                            result=dict(cancelled=True,added=False,committed=False)
                     elif self.path=='/api/automate-boxes':
                         editor.check_revision(state,payload)
                         from automate_pores import propose_boxes
@@ -654,6 +708,9 @@ def make_handler(editor):
                     elif self.path=='/api/large-pick': result=editor.large_search.pick(state,payload)
                     elif self.path in ["/api/predict","/api/polygon"]:
                         result=editor.preview(state,payload,self.path.endswith("polygon"))
+                    elif self.path=='/api/box-pores':
+                        from box_pores import preview_box
+                        result=preview_box(editor,state,payload)
                     elif self.path=='/api/trim-preview-overlap':
                         result=editor.trim_preview_overlap(state,payload)
                     elif self.path=='/api/queued-preview': result=editor.queued_preview(state,payload)

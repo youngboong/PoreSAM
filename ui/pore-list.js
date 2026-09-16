@@ -7,6 +7,7 @@
     const distance=color=>Math.min(...colors.map(base=>[1,3,5].reduce((sum,i)=>sum+(parseInt(color.slice(i,i+2),16)-parseInt(base.slice(i,i+2),16))**2,0)));
     return ['#ff00ff','#00ffff','#ffff00','#ff5533','#4488ff'].sort((a,b)=>distance(b)-distance(a))[0];
   }
+  window.selectionColor=contrastColor;
   function selectionRows(){
     document.querySelectorAll('#poreListRows tr[data-id]').forEach(row=>{
       const active=selected.has(Number(row.dataset.id));
@@ -39,9 +40,10 @@
   }
   function clearSelection(){pickEpoch++;selected.clear();renderSelection()}
   function selectPore(id,toggle=false,center=true){
-    if(toggle){if(selected.has(id))selected.delete(id);else selected.add(id)}
+    if(selected.has(id))selected.delete(id);
+    else if(toggle)selected.add(id);
     else selected=new Set([id]);
-    return renderSelection(center?id:null);
+    return renderSelection(center&&selected.has(id)?id:null);
   }
   window.drawSelectedPore=context=>{
     if(!mask)return;

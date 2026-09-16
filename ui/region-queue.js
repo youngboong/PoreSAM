@@ -103,13 +103,14 @@
     return work('Preparing queued regions…',async()=>{
       storePoints();
       if(draft()){rememberInput();if(!window.queueCurrentRegion())throw new Error('Maximum 32 regions. Clear some regions first.')}
-      const selected=active;
+      const selectedRegion=queuedRegions[active];
       await pruneCache();invalidate();
       for(let i=0;i<queuedRegions.length;i++){
         const region=queuedRegions[i];if(region.status==='Added'||!dirty(region))continue;
         setStatus('Processing region '+(i+1)+' / '+queuedRegions.length+'...');
         try{await generate(i)}catch(error){region.error=error.message}
       }
+      const selected=queuedRegions.indexOf(selectedRegion);
       const first=selected>=0&&queuedRegions[selected]?.status==='Ready'?selected:queuedRegions.findIndex(r=>r.status==='Ready');
       if(first>=0)await review(first);else setStatus('No previews available. Check failed regions.',true);
       window.renderRegionQueue();draw();
@@ -128,26 +129,49 @@
       if(next>=0)await review(next);else setStatus('Region '+(index+1)+' added.');
     });
   };
-  $('automatePores').onclick=()=>work('Finding additional pores...',async()=>{
+  $('automatePores').onclick=()=>{
+    if(window.activeStopOperation?.buttonId==='automatePores')return window.activeStopOperation.stop();
+    return work('Finding additional pores...',async()=>{
     if(!state)return;
-    const result=await api('automate-boxes',payload());let added=0;
-    // Preserve drawing drafts while each successful addition updates measurements.
+    const operation=beginStopOperation('automatePores','Automate',setStatus);
+    let operationId=null,added=0,merged=0;
+    // Keep all additions staged until the complete operation is committed.
     const draftState=structuredClone({points,labels,box,shape,polygon,cutPath,cutPaths,queuedRegions,inputHistory});
-    const previousActive=active;
+    let previousActive=active;
     try{
+      const started=await api('start-automate',payload());operationId=started.operation_id;
+      operation.connect(()=>api('stop-automate',{operation_id:operationId}));
+      const result=operation.requested?{boxes:[]}:await api('automate-boxes',payload());
       for(let i=0;i<result.boxes.length;i++){
-        setStatus('Automate '+(i+1)+' / '+result.boxes.length+' - '+added+' added');
-        const response=await api('automate-add',{...payload(),box:result.boxes[i].box});
-        if(response.added){
-          added++;preserve=true;try{await accept(response.state)}finally{preserve=false}
+        if(operation.requested)break;
+        setStatus('Automate '+(i+1)+' / '+result.boxes.length+' - '+added+' added, '+merged+' merged');
+        const response=await api('automate-add',{...payload(),box:result.boxes[i].box,operation_id:operationId});
+        if(response.added)added++;
+        if(response.merged)merged++;
+        if(response.cancelled){operation.markStopping();break}
+      }
+      if(operation.requested)setStatus('Automate stopped. No changes applied.');
+      else{
+        setStatus('Finalizing Automate…');
+        const committed=await api('commit-automate',{...payload(),operation_id:operationId});
+        if(committed.cancelled)setStatus('Automate stopped. No changes applied.');
+        else{
+          if(committed.state){preserve=true;try{await accept(committed.state)}finally{preserve=false}}
+          const selectedDraft=draftState.queuedRegions[previousActive];
+          draftState.queuedRegions=draftState.queuedRegions.filter(region=>region.status!=='Review overlap');
+          previousActive=draftState.queuedRegions.indexOf(selectedDraft);
+          setStatus('Automate complete: '+committed.added_count+' added, '+(committed.merged_count||0)+' merged.');
         }
       }
-      setStatus('Automate complete: '+added+' pores added.');
     }finally{
-      ({points,labels,box,shape,polygon,cutPath,cutPaths,queuedRegions,inputHistory}=draftState);active=previousActive;
-      invalidate();window.renderRegionQueue();draw();
+      try{if(operationId)await api('finish-automate',{operation_id:operationId})}finally{
+        operation.finish();
+        ({points,labels,box,shape,polygon,cutPath,cutPaths,queuedRegions,inputHistory}=draftState);active=previousActive;
+        if(queuedRegions.length)queueDataset=state?.dataset;
+        invalidate();window.renderRegionQueue();draw();
+      }
     }
-  });
+  });};
   // Returning to an unrelated image cannot reuse its pending prompts.
   const accepted=window.onEditorAccepted;
   window.onEditorAccepted=data=>{if(queueDataset&&queueDataset!==data.dataset){preserve=false;window.clearRegionQueue()}accepted?.(data)};

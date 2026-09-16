@@ -3,6 +3,7 @@ import io
 import json
 import threading
 import time
+from unittest.mock import patch
 from http.server import ThreadingHTTPServer
 import numpy as np
 from PIL import Image
@@ -40,13 +41,15 @@ def main():
     server=ThreadingHTTPServer(('127.0.0.1',0),make_handler(editor));threading.Thread(target=server.serve_forever,daemon=True).start();errors=[]
     # Deterministic SAM stand-in: exercise box/ellipse prompt plumbing without loading a model.
     class Predictor:
+        model=None
         def predict(self,point_coords,point_labels,box,multimask_output):
             mask=np.zeros((400,400),bool)
             x0,y0,x1,y1=np.rint(box).astype(int);mask[y0:y1+1,x0:x1+1]=True
             return np.array([mask]),np.array([1.]),None
     editor.predictor=Predictor();editor.encoded_dataset=dataset
     try:
-        with sync_playwright() as p:
+        with patch('box_pores.ProgressGenerator') as generator,sync_playwright() as p:
+            generator.return_value.generate.return_value=[]
             browser=p.chromium.launch(executable_path=r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',headless=True)
             page=browser.new_page(viewport=dict(width=1700,height=1100));page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.server_port}')

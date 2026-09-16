@@ -21,6 +21,10 @@ class ProgressGenerator(SAM2AutomaticMaskGenerator):
     batches = 0
 
     def _process_batch(self, *args, **kwargs):
+        if getattr(self, "cancel_callback", None):
+            self.cancel_callback()
+        if not self.batches and getattr(self, "batch_started_callback", None):
+            self.batch_started_callback()
         result = super()._process_batch(*args, **kwargs)
         self.batches += 1
         if getattr(self, "progress_callback", None):
@@ -56,7 +60,7 @@ def detect_scale_bar(gray, footer_y, label_um):
                 um_per_pixel=float(label_um / (w - 1)))
 
 
-def candidates_from_masks(raw, gray, min_contrast=8, min_area=100):
+def candidates_from_masks(raw, gray, min_contrast=8, min_area=100, max_area_fraction=.20):
     if not np.isfinite(min_contrast) or not 0 <= min_contrast <= 255:
         raise ValueError("Brightness difference must be between 0 and 255.")
     if not np.isfinite(min_area) or min_area < 1:
@@ -74,7 +78,7 @@ def candidates_from_masks(raw, gray, min_contrast=8, min_area=100):
             continue
         filled = ndi.binary_fill_holes(largest)
         area = int(filled.sum())
-        if area < min_area or area > gray.size * 0.20:
+        if area < min_area or area > gray.size * max_area_fraction:
             continue
         ring = ndi.binary_dilation(filled, iterations=4) & ~filled
         contrast = float(gray[ring].mean() - gray[filled].mean()) if ring.any() else 0

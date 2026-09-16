@@ -2,6 +2,7 @@
 import hashlib
 import json
 from pathlib import Path
+from app_paths import checkpoint_path
 import secrets
 import threading
 import traceback
@@ -63,7 +64,7 @@ class LargePoreSearch:
                 else:
                     self.editor.predictor=None;self.editor.encoded_dataset=None
                     release_device_cache(self.editor.device)
-                    model=build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device=self.editor.device,apply_postprocessing=False)
+                    model=build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(checkpoint_path()),device=self.editor.device,apply_postprocessing=False)
                     predictor=SAM2ImagePredictor(model)
                     try:
                         masks,audit=generate_large_pores(gray,predictor,lambda p,m:self.progress(job_id,p,m),strength=strength)

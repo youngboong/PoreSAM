@@ -103,7 +103,8 @@ def histogram_table(values):
 
 
 def export_folder(folder):
-    cache = Path(__file__).resolve().parents[1] / "outputs" / ".matplotlib"
+    from app_paths import output_root
+    cache = output_root() / ".matplotlib"
     cache.mkdir(parents=True, exist_ok=True)
     os.environ.setdefault("MPLCONFIGDIR", str(cache))
     import matplotlib

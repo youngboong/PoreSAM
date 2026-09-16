@@ -24,7 +24,8 @@ def export_plot(state,payload):
     keys=[x_key,y_key] if kind=='scatter' else [x_key]
     rows=rows.dropna(subset=keys)
     if rows.empty:raise ValueError('No valid values to plot.')
-    cache=Path(__file__).resolve().parents[1]/'outputs/.matplotlib';cache.mkdir(parents=True,exist_ok=True)
+    from app_paths import output_root
+    cache=output_root()/'.matplotlib';cache.mkdir(parents=True,exist_ok=True)
     os.environ.setdefault('MPLCONFIGDIR',str(cache))
     import matplotlib
     matplotlib.use('Agg')

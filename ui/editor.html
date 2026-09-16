@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PoreSAM</title>
 <link rel="stylesheet" href="/workspace.css"></head><body>
-<header><h1>PoreSAM</h1><span>Image Analysis</span></header>
+<header><div class="app-brand"><h1>PoreSAM</h1><span>Pore Segmentation &amp; Analysis</span></div></header>
 <nav class="steps" aria-label="Workflow"><button data-panel="load" class="active" aria-current="step">1 <span>Load Image</span></button><button data-panel="setup" disabled>2 <span>Preprocess</span></button><button data-panel="editor" disabled>3 <span>Analyze &amp; Edit</span></button><button data-panel="analysis" disabled>4 <span>Generate Report</span></button></nav>
 <section id="loadPanel" class="workspace-panel">
 <div class="workspace-intro"><h2>Load Image</h2></div>
@@ -102,8 +102,8 @@ function histogram(rows){
   const max=Math.max(...values),n=12,bins=Array(n).fill(0);
   values.forEach(v=>bins[Math.min(n-1,Math.floor(v/max*n))]++);
   const top=Math.max(...bins),left=30,right=w-10,bottom=height-30,barWidth=(right-left)/n;
-  c.fillStyle='#187b74';bins.forEach((v,i)=>{const barHeight=v/top*(bottom-20);c.fillRect(left+i*barWidth,bottom-barHeight,Math.max(1,barWidth-2),barHeight)});
-  c.fillStyle='#344950';c.font='12px Segoe UI, sans-serif';c.fillText('0',left,bottom+20);c.textAlign='right';c.fillText(max.toFixed(1)+' \u00b5m',right,bottom+20);c.fillText(String(top),left-6,20);
+  c.fillStyle='#2563eb';bins.forEach((v,i)=>{const barHeight=v/top*(bottom-20);c.fillRect(left+i*barWidth,bottom-barHeight,Math.max(1,barWidth-2),barHeight)});
+  c.fillStyle='#475569';c.font='12px Segoe UI, sans-serif';c.fillText('0',left,bottom+20);c.textAlign='right';c.fillText(max.toFixed(1)+' \u00b5m',right,bottom+20);c.fillText(String(top),left-6,20);
 }
 new ResizeObserver(()=>{if(state)histogram(state.candidates)}).observe($('hist'));
 window.addEventListener('resize',()=>{if(state)histogram(state.candidates)});

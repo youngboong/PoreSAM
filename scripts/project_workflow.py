@@ -6,6 +6,7 @@ import io
 import json
 import math
 from pathlib import Path
+from app_paths import checkpoint_path
 import secrets
 import threading
 import traceback
@@ -23,6 +24,8 @@ from segment_first_pass import (detect_footer, detect_scale_bar, candidates_from
                                 ProgressGenerator, overlay)
 from sam2.build_sam import build_sam2
 from sam_runtime import inference_context, release_device_cache
+from operation_cancel import OperationCancelled
+from analysis_timing import AnalysisTiming
 
 
 class ProjectWorkflow:
@@ -30,6 +33,7 @@ class ProjectWorkflow:
         self.editor, self.root, self.image_exporter = editor, Path(root), image_exporter
         self.lock = threading.RLock()
         self.projects, self.jobs = {}, {}
+        self.job_timings = {}
         self.running = False
         self.digest_cache = {}
         for path in self.root.glob('*/project.json'):
@@ -191,6 +195,7 @@ class ProjectWorkflow:
             (folder/run_id).mkdir(parents=True)
             job_id = secrets.token_hex(12)
             self.running = True
+            self.job_timings[job_id] = AnalysisTiming()
             self.jobs[job_id] = dict(id=job_id, project_id=project_id, status='running', progress=1,
                                      message='Preparing analysis…')
             threading.Thread(target=self.run, args=(job_id, copy.deepcopy(project), config, run_id, number), daemon=True).start()
@@ -199,17 +204,39 @@ class ProjectWorkflow:
     def status(self, job_id):
         with self.lock:
             if job_id not in self.jobs: raise ValueError('Analysis job not found. Check saved analyses.')
-            return copy.deepcopy(self.jobs[job_id])
+            result=copy.deepcopy(self.jobs[job_id])
+            timing=self.job_timings.get(job_id)
+            if timing:result.update(timing.snapshot(result['status'],10<=result['progress']<82))
+            return result
+
+    def batch_progress(self,job_id,completed,total):
+        with self.lock:
+            self.job_timings[job_id].batch(completed,total)
+            self.progress(job_id,min(80,10+int(70*completed/total)),'Detecting pores…')
 
     def progress(self, job_id, percent, message):
         with self.lock:
+            self.check_cancel(job_id)
             self.jobs[job_id].update(progress=percent,message=message)
+
+    def cancel(self, job_id):
+        with self.lock:
+            if job_id not in self.jobs: raise ValueError('Analysis job not found.')
+            if self.jobs[job_id]['status']=='running':
+                self.jobs[job_id].update(status='stopping',message='Stopping…')
+            return copy.deepcopy(self.jobs[job_id])
+
+    def check_cancel(self, job_id):
+        with self.lock:
+            if self.jobs[job_id]['status']=='stopping':
+                raise OperationCancelled('Analysis stopped.')
 
     def run(self, job_id, project, config, run_id, number):
         folder = self.root/project['id']/'runs'/run_id
         try:
             # Serialize model operations and report rendering with manual edits.
             with self.editor.lock:
+                self.check_cancel(job_id)
                 self.editor.predictor = None
                 self.editor.encoded_dataset = None
                 device = self.editor.device
@@ -240,16 +267,23 @@ class ProjectWorkflow:
                         raw = [dict(item,segmentation=data[f'mask_{i}'].copy()) for i,item in enumerate(metadata)]
                 else:
                     self.progress(job_id,5,f'Loading SAM ({device.upper()})')
-                    with inference_context(device):
-                        model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(Path(__file__).resolve().parents[1]/'checkpoints/sam2.1_hiera_small.pt'),device=device,apply_postprocessing=False)
-                        generator = ProgressGenerator(model,**settings)
-                        generator.progress_callback = lambda n:self.progress(job_id,min(80,10+int(70*n/math.ceil(settings['points_per_side']**2/8))),'Detecting pores…')
-                        raw = generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
-                    del generator,model
-                    release_device_cache(device)
+                    model = generator = None
+                    try:
+                        with inference_context(device):
+                            model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(checkpoint_path()),device=device,apply_postprocessing=False)
+                            self.check_cancel(job_id)
+                            generator = ProgressGenerator(model,**settings)
+                            generator.cancel_callback = lambda:self.check_cancel(job_id)
+                            generator.batch_started_callback = self.job_timings[job_id].start_detection
+                            generator.progress_callback = lambda n:self.batch_progress(job_id,n,math.ceil(settings['points_per_side']**2/8))
+                            raw = generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
+                    finally:
+                        del generator,model
+                        release_device_cache(device)
                     metadata = [{k:v for k,v in item.items() if k!='segmentation'} for item in raw]
                 self.progress(job_id,82,'Filtering pores…')
                 selected = candidates_from_masks(raw,sam_gray,config['min_contrast'],config['min_area_pixels'])
+                self.check_cancel(job_id)
                 write_artifact(folder,'raw_metadata.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8')
                 np.savez_compressed(write_artifact(folder,'raw_masks.npz'),**{f'mask_{i}':item['segmentation'] for i,item in enumerate(raw)})
                 masks = {i+1:item['mask'] for i,item in enumerate(selected)}
@@ -272,14 +306,24 @@ class ProjectWorkflow:
                 overlay(gray,[a['segmentation'] for a in raw]).save(write_artifact(folder,'raw_sam_overlay.png'))
             dataset = project['id']+'__'+run_id
             with self.lock:
+                self.check_cancel(job_id)
                 current = self.projects[project['id']]
                 current['config'] = config
                 current['runs'].append(dict(id=run_id,number=number,dataset=dataset,config=config))
                 self.persist(current)
                 self.jobs[job_id].update(status='complete',progress=100,message='Analysis complete.',dataset=dataset,candidate_count=len(masks))
                 self.running=False
+        except OperationCancelled:
+            (folder/'report.json').unlink(missing_ok=True)
+            with self.lock:
+                self.jobs[job_id].update(status='cancelled',message='Analysis stopped.')
+                self.running=False
         except Exception as exc:
             (folder/'error.txt').write_text(traceback.format_exc(),encoding='utf-8')
             with self.lock:
                 self.jobs[job_id].update(status='failed',message=f'Analysis failed: {exc}')
                 self.running=False
+
+        finally:
+            with self.lock:
+                if job_id in self.job_timings:self.job_timings[job_id].snapshot(self.jobs[job_id]['status'],False)

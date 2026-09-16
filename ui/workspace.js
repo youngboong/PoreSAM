@@ -1,4 +1,24 @@
 let setupProject=null,setupImage=null,scalePoints=[],measuringScale=false,imageLibrary=[],datasetLabels={};
+function beginStopOperation(buttonId,label,notice){
+  const operation={buttonId,label,requested:false,stopping:false,cancel:null,
+    render(){const button=$(buttonId);button.classList.add('stop-operation');button.textContent=this.stopping?'Stopping…':'Stop';button.disabled=this.stopping;},
+    markStopping(){this.requested=true;this.stopping=true;this.render();},
+    async stop(){
+      if(this.stopping)return;
+      this.markStopping();notice('Stopping…');
+      if(this.cancel)await this.sendStop();
+    },
+    async sendStop(){
+      try{await this.cancel()}catch(error){
+        if(window.activeStopOperation!==this)return;
+        this.stopping=false;this.render();notice('Could not stop: '+error.message,true);
+      }
+    },
+    connect(cancel){this.cancel=cancel;if(this.requested)this.sendStop();},
+    finish(){if(window.activeStopOperation!==this)return;window.activeStopOperation=null;const button=$(buttonId);button.classList.remove('stop-operation');button.textContent=label;button.disabled=busy;}
+  };
+  window.activeStopOperation=operation;operation.render();return operation;
+}
 const setupCanvas=$('setupCanvas'),setupContext=setupCanvas.getContext('2d');
 function showPanel(name){
   if(!['load','setup','editor','analysis'].includes(name))return;
@@ -11,7 +31,7 @@ function showPanel(name){
   if(name==='load')setLoadMode('new');
   window.scrollTo(0,0);
 }
-window.updateWorkspaceControls=()=>{document.querySelector('[data-panel="setup"]').disabled=busy||(!setupProject&&!state)};
+window.updateWorkspaceControls=()=>{document.querySelector('[data-panel="setup"]').disabled=busy||(!setupProject&&!state);window.activeStopOperation?.render()};
 document.querySelectorAll('[data-panel]').forEach(button=>button.onclick=()=>{
   if(button.dataset.panel==='setup'&&!setupProject&&state)return workspaceWork('Loading settings…',()=>prepareExisting(state.dataset));
   showPanel(button.dataset.panel);
@@ -164,18 +184,40 @@ setupCanvas.onclick=event=>{
   if(scalePoints.length===2){$('scalePixels').value=Math.hypot(scalePoints[1][0]-scalePoints[0][0],scalePoints[1][1]-scalePoints[0][1]).toFixed(2);measuringScale=false;$('measureScale').classList.remove('active');$('scaleConfirmed').checked=false;updateCalibration();jobMessage('Enter the scale length in µm and confirm.')}
   drawSetup();
 };
+function analysisDuration(seconds){
+  seconds=Math.max(0,Math.ceil(seconds));
+  if(seconds<60)return seconds+'s';
+  if(seconds<3600)return Math.floor(seconds/60)+'m '+(seconds%60)+'s';
+  return Math.floor(seconds/3600)+'h '+Math.floor(seconds%3600/60)+'m';
+}
+function analysisJobMessage(job){
+  if(!Number.isFinite(job.elapsed_seconds))return job.message;
+  let message=job.message+' · Elapsed '+analysisDuration(job.elapsed_seconds);
+  if(job.status==='running'&&job.progress<82){
+    message+=Number.isFinite(job.detection_remaining_seconds)
+      ?' · Detection: ~'+analysisDuration(job.detection_remaining_seconds)+' remaining'
+      :' · Estimating time…';
+  }
+  return message;
+}
 async function followJob(jobId){
   localStorage.setItem('poreActiveJob',jobId);
+  const operation=window.activeStopOperation||beginStopOperation('runAnalysis','Run Analysis',jobMessage);
+  operation.connect(()=>api('stop-analysis',{job_id:jobId}));
+  try{
   while(true){
-    const job=await api('job',{job_id:jobId});$('analysisProgress').value=job.progress;jobMessage(job.message);
+    const job=await api('job',{job_id:jobId});$('analysisProgress').value=job.progress;jobMessage(analysisJobMessage(job));
+    if(job.status==='stopping')operation.markStopping();
+    if(job.status==='cancelled'){localStorage.removeItem('poreActiveJob');setStatus('Analysis stopped.');return}
     if(job.status==='failed'){localStorage.removeItem('poreActiveJob');throw new Error(job.message)}
     if(job.status==='complete'){
       localStorage.removeItem('poreActiveJob');await refreshLists();updateHistory(job.dataset);
       await accept(await api('load',{dataset:job.dataset}));showPanel('editor');
-      jobMessage('Analysis complete · '+job.candidate_count+' pores');setStatus('Analysis complete.');return;
+      jobMessage('Analysis complete · '+job.candidate_count+' pores'+(Number.isFinite(job.elapsed_seconds)?' · Elapsed '+analysisDuration(job.elapsed_seconds):''));setStatus('Analysis complete.');return;
     }
     await new Promise(resolve=>setTimeout(resolve,1000));
   }
+  }finally{operation.finish()}
 }
 function validateAnalysisInput(){
   if(!setupProject)throw new Error('Choose an image first.');
@@ -190,11 +232,15 @@ function validateAnalysisInput(){
   if(!$('scaleConfirmed').checked){$('scaleConfirmed').focus();throw new Error('Confirm calibration first.')}
 }
 $('runAnalysis').onclick=()=>{
+  if(window.activeStopOperation?.buttonId==='runAnalysis')return window.activeStopOperation.stop();
   if(busy)return;
   try{validateAnalysisInput()}catch(error){jobMessage(error.message,true);setStatus(error.message,true);return}
   return workspaceWork('Preparing analysis…',async()=>{
+  const operation=beginStopOperation('runAnalysis','Run Analysis',jobMessage);
+  try{
   const config={...preprocessingPayload(),scale_um:Number($('scaleUm').value),scale_pixels:Number($('scalePixels').value),min_contrast:Number($('minContrast').value),min_area_pixels:Number($('minArea').value),points_per_side:Number($('pointDensity').value),scale_confirmed:$('scaleConfirmed').checked};
   const job=await api('analyze',{project_id:setupProject.id,config});$('analysisProgress').value=0;await followJob(job.job_id);
+  }finally{operation.finish()}
   });
 };
 window.onEditorAccepted=data=>{
