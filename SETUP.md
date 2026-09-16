@@ -1,8 +1,8 @@
-# pore 환경
+# English browser environment
 
-Windows PowerShell에서 실행합니다. GPU가 없어도 CPU로 실행할 수 있습니다.
+These instructions apply to the `english` browser branch on Windows PowerShell. For the current Windows desktop app and its separate CPU build environment, use [app / DESKTOP.md](https://github.com/youngboong/PoreSAM/blob/app/DESKTOP.md).
 
-## CPU 환경
+## CPU
 
 ```powershell
 conda create -n pore python=3.11 -y
@@ -12,36 +12,37 @@ $env:SAM2_BUILD_CUDA = '0'
 python -m pip install --no-build-isolation -r requirements.txt
 python -m pip check
 python scripts/check_environment.py --device cpu
+```
+
+Download the SAM 2.1 Small checkpoint separately from the [official SAM 2 repository](https://github.com/facebookresearch/sam2) and place it at `checkpoints/sam2.1_hiera_small.pt`. Input images, weights and generated results are not included in Git.
+
+```powershell
 python scripts/pore_editor.py --device cpu
 ```
 
-SAM 2.1 Small 가중치는 별도로 `checkpoints/sam2.1_hiera_small.pt`에 준비합니다. CPU 환경에서는 CUDA 패키지 버전이 기록된 `requirements-lock.txt` 대신 `requirements.txt`를 사용하세요. GPU용 PyTorch가 이미 설치된 환경에서도 `--device cpu`로 실행할 수 있습니다.
+Open http://127.0.0.1:8765 in a browser. Use `--port 8766` if needed; stop the server with Ctrl+C. See [EDITOR.md](EDITOR.md) for the workflow. This branch does not include `pore_app.py` or Windows desktop packaging.
 
-## NVIDIA GPU 환경
+## NVIDIA GPU
+
+In a separate environment, install CUDA PyTorch before the remaining requirements:
 
 ```powershell
-conda create -n pore python=3.11 -y
-conda activate pore
+conda create -n pore-gpu python=3.11 -y
+conda activate pore-gpu
 python -m pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu126
 $env:SAM2_BUILD_CUDA = '0'
 python -m pip install --no-build-isolation -r requirements.txt
 python -m pip check
-python scripts/check_environment.py
+python scripts/check_environment.py --device cuda
+python scripts/pore_editor.py --device cuda
 ```
 
-실제 설치된 전체 패키지 버전은 `requirements-lock.txt`에 기록했습니다.
-동일한 환경을 재현하려면 위의 PyTorch 설치와 `SAM2_BUILD_CUDA` 설정 후
-`python -m pip install --no-build-isolation -r requirements-lock.txt`를 사용합니다.
+The default `--device auto` selects CUDA when available, otherwise CPU. A CUDA-compatible GPU and driver are required for `--device cuda`. The optional SAM CUDA extension is omitted on Windows; CUDA inference still uses PyTorch. SAM extension-dependent small-hole/speckle postprocessing is unavailable.
 
-SAM 2.1을 지원하는 공식 SAM 2 소스의 버전을 고정했습니다.
-Windows에서 별도 CUDA 컴파일러 없이 설치하도록 선택적 SAM CUDA 확장을 생략합니다.
-GPU 추론은 PyTorch의 CUDA를 사용합니다. SAM 확장에 의존하는 작은 구멍/점 제거 후처리는 사용할 수 없습니다.
+`requirements-lock.txt` records the earlier CUDA development environment. For CPU, use `requirements.txt` after installing CPU PyTorch instead of that CUDA lock file.
 
-VS Code에서 `Python: Select Interpreter`로 `pore`를 선택합니다.
-노트북에서도 커널로 같은 환경을 선택하면 됩니다.
+## Development and checks
 
-`scripts/check_environment.py`는 패키지 로딩, 선택된 장치의 연산, TorchVision NMS,
-SAM 2.1 설정 로딩 및 TIFF 읽기를 확인합니다. 학습된 가중치 다운로드나 분할 정확도 검증은 별도입니다.
+Select the environment through VS Code's **Python: Select Interpreter**. Optional browser checks use `requirements-dev.txt` and an installed Microsoft Edge.
 
-사용자가 박스·포함/제외 점으로 누락을 추가하는 화면은 `python scripts/pore_editor.py`로 실행합니다.
-브라우저에서 http://127.0.0.1:8765 를 열며, 자세한 사용법은 [EDITOR.md](EDITOR.md)에 있습니다.
+`check_environment.py` checks imports, device operations, TorchVision NMS, SAM configuration construction and TIFF reading. It does not download trained weights or validate segmentation accuracy. Browser data is stored in the project's `outputs` directory.

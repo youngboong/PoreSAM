@@ -1,6 +1,6 @@
 # PoreSAM Editor
 
-English UI on the `english` branch. The Korean edition remains on `korean`.
+This guide covers the earlier English browser UI on `english`. The current English Windows desktop app is on the default [app branch](https://github.com/youngboong/PoreSAM/tree/app), and the earlier Korean browser UI remains on [korean](https://github.com/youngboong/PoreSAM/tree/korean). Desktop behavior and recent Automate updates are documented on `app`.
 
 ## Run
 
@@ -18,7 +18,7 @@ Open http://127.0.0.1:8765. Stop the server with Ctrl+C. Use `--port 8766` if th
 1. **Load Image** always opens **New Image**. Import TIF, PNG or JPG (up to 32 MB). Importing an already analyzed file also opens preprocessing; use **Open Analysis** to resume its saved masks.
 2. **Preprocess**: confirm the analysis region and calibration. Measure both ends of the scale bar, enter its physical length, then check **Confirm calibration**. Adjust processing while comparing the original and live preview. **Run Analysis** starts automatic segmentation.
 3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**. **Save Images** opens a folder picker and saves `comparison.png` (original left, segmentation right), `segmentation.png`, and `pores_colored.png`. The original footer is retained; color, opacity, and ID visibility follow the display controls. Only saved pore masks are exported, not pending previews.
-4. **Report**: choose a destination with **Browse…**, then **Generate & Export**. Each export creates a separate folder containing the original file, segmentation and comparison images, measurements, PDF and HTML reports.
+4. **Generate Report**: choose a destination with **Browse…**, then **Generate Report**. Each export creates a separate folder containing only `report.pdf` and standalone `report.html`. Use **Save Images** in step 3 for image exports. The uploaded original and internal measurement files remain under the project's `outputs` directory.
 
 ## Processing
 
@@ -61,9 +61,9 @@ Queued regions are temporary and clear when switching to selection mode, loading
 
 ## Pore Details
 
-The modeless window stays open while editing. Drag its title bar to move it, or any corner or edge to resize. Escape closes it. New manual pores appear in the list automatically.
+The modeless popup stays open inside the browser while editing; it is not a separate Windows window. Drag its title bar to move it within the page, or any corner or edge to resize. Escape closes it. New manual pores appear in the list automatically.
 
-- **Details**: ID, length, width, aspect ratio, equivalent diameter and roundness; min, max, mean and sample standard deviation below the table.
+- **Details**: ID, length, width, aspect ratio, equivalent diameter, roundness and area fraction; min, max, mean and sample standard deviation below the table.
 - **Pores** dropdown: filter the table and plots by ID.
 - **Histogram**: select a measurement and bin count.
 - **Scatter Plot**: select X and Y measurements. All points use one color. Clicking a point highlights its pore on the image.
