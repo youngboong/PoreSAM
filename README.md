@@ -2,7 +2,15 @@
 
 SAM 2.1 기반 SEM 이미지 pore 분할·편집·측정 도구입니다. 현재 UI는 한국어이며, Windows에서 로컬 서버를 실행하고 브라우저로 사용합니다.
 
-한국어판은 `korean` 브랜치에서 관리합니다. 영어판은 이 버전을 바탕으로 `english` 브랜치에서 별도로 개발할 예정입니다.
+이 브랜치는 기존 한국어 브라우저판입니다. 최신 영어 Windows 앱은 기본 브랜치인 [app](https://github.com/youngboong/PoreSAM/tree/app)에서 제공하며, 기존 영어 브라우저판은 [english](https://github.com/youngboong/PoreSAM/tree/english)에 있습니다.
+
+| 브랜치 | 언어 | 실행 방식 |
+|---|---|---|
+| [app](https://github.com/youngboong/PoreSAM/tree/app) — 기본 | 영어 | 최신 Windows 데스크톱 앱, `scripts/pore_app.py` |
+| [english](https://github.com/youngboong/PoreSAM/tree/english) | 영어 | 기존 로컬 서버 + 브라우저, `scripts/pore_editor.py` |
+| korean — 현재 브랜치 | 한국어 | 기존 로컬 서버 + 브라우저, `scripts/pore_editor.py` |
+
+언어 선택만 다른 동일 버전이 아니라, 기능과 저장 방식에 차이가 있는 별도 브랜치입니다. 최신 데스크톱·Automate 기능은 `app`을 참고하세요. 이 브랜치에는 데스크톱 실행 파일이나 `pore_app.py`가 없습니다.
 
 ## 주요 기능
 
@@ -14,6 +22,8 @@ SAM 2.1 기반 SEM 이미지 pore 분할·편집·측정 도구입니다. 현재
 - 원본과 결과 비교, 색상·투명도 조절
 - Pore details 창에서 개별 측정값, 요약 통계, Histogram, Scatter plot 확인
 - 수정본별 이미지·측정 결과 저장 및 CSV·PNG·PDF 내보내기
+
+이 한국어판의 보고서 내보내기는 `original/`, `images/`, `measurements/`를 포함하는 결과 묶음입니다. 영어판·데스크톱판의 이미지/보고서 분리 내보내기와 구분하세요. Pore details는 브라우저 화면 안의 팝업이며 별도 Windows 창이 아닙니다.
 
 ## 실행
 

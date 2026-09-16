@@ -1,5 +1,7 @@
 # pore 환경
 
+이 문서는 `korean` 브랜치의 한국어 브라우저판 환경입니다. 최신 영어 Windows 앱은 기본 [app 브랜치의 DESKTOP.md](https://github.com/youngboong/PoreSAM/blob/app/DESKTOP.md)에 있는 `pore-app-cpu` 환경과 `scripts/pore_app.py`를 사용합니다.
+
 Windows PowerShell에서 실행합니다. GPU가 없어도 CPU로 실행할 수 있습니다.
 
 ## CPU 환경
