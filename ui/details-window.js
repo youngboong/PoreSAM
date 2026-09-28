@@ -9,7 +9,7 @@ async function api(route,data){
   const response=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json','X-Pore-Editor':'1'},body:JSON.stringify(data)});
   const result=await response.json();if(!response.ok)throw new Error(result.error||'Request failed');return result;
 }
-function controls(){document.querySelectorAll('button,select,input').forEach(e=>e.disabled=busy||!state)}
+function controls(){document.querySelectorAll('button,select,input').forEach(e=>e.disabled=busy||!state);window.updateColumnControls?.()}
 async function work(message,fn){if(busy||!state)return;exporting=true;busy=true;controls();setStatus(message);try{await fn()}catch(error){setStatus(error.message)}finally{exporting=false;busy=false;await synchronize()}}
 async function select(id,toggle=false){
   if(busy||!state)return;
@@ -38,6 +38,7 @@ async function synchronize(){
     document.querySelectorAll('#poreListRows tr[data-id]').forEach(row=>{
       const selected=selection.includes(Number(row.dataset.id));row.classList.toggle('selected',selected);row.setAttribute('aria-selected',String(selected));
     });
+    $('poreDetailsTitle').textContent=next.stale?'Pore Details · Click Pore Details in the editor to update':'Pore Details';
     controls();
   }catch(error){setStatus(error.message)}finally{polling=false}
 }

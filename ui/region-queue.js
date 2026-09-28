@@ -44,12 +44,33 @@
     window.renderRegionQueue();return true;
   };
   window.clearRegionQueue=()=>{if(preserve)return;queuedRegions=[];active=-1;queueDataset=null;window.renderRegionQueue()};
+  async function skipRegion(index){
+    if(index<0){
+      // An unqueued drawing belongs only to this preview.
+      points=[];labels=[];box=null;shape=null;polygon=[];
+    }else{
+      const wasActive=index===active;
+      if(!wasActive)storePoints();
+      queuedRegions.splice(index,1);
+      if(wasActive){points=[];labels=[]}
+      else if(active>index)active--;
+    }
+    active=-1;inputHistory=[];invalidate();
+    await pruneCache();
+    const start=Math.max(0,index),order=[...queuedRegions.keys()].slice(start).concat([...queuedRegions.keys()].slice(0,start));
+    const next=order.find(i=>queuedRegions[i].status==='Ready')??-1;
+    if(next>=0)await review(next);
+    else{const pending=order.find(i=>queuedRegions[i].status!=='Added')??-1;if(pending>=0)await review(pending);else setStatus('Region skipped.')}
+    window.renderRegionQueue();draw();
+  }
+  $('skipRegion').onclick=()=>work('Skipping region…',()=>skipRegion(draft()?-1:active));
   window.renderRegionQueue=()=>{
     list.replaceChildren();
     finish.classList.toggle('hidden',!['box','ellipse','polygon'].includes(mode));
     const pending=queuedRegions.filter(r=>r.status!=='Added'&&dirty(r)).length;
     $('predict').textContent=queuedRegions.length?'Preview All ('+pending+')':'Preview';
     const current=queuedRegions[active];
+    $('skipRegion').disabled=busy||!state||(!draft()&&!preview&&(!current||current.status==='Added'));
     update.classList.toggle('hidden',!current||current.status==='Added'||!['positive','negative','box','ellipse'].includes(mode));
     update.disabled=busy||!current||(!dirty(current)&&!points.length);
     if(current&&(dirty(current)||points.length)&&!draft())$('apply').disabled=true;
@@ -59,8 +80,8 @@
       button.textContent=(i+1)+'. '+region.kind+' · '+region.status;button.title=region.error||'Review this region';
       button.disabled=busy||region.status==='Added';
       button.onclick=()=>work('Loading region '+(i+1)+'…',()=>review(i));
-      const remove=document.createElement('button');remove.textContent='×';remove.title='Remove region';remove.disabled=busy;
-      remove.onclick=()=>{rememberInput();queuedRegions.splice(i,1);active=-1;invalidate();window.renderRegionQueue();draw()};
+      const remove=document.createElement('button');remove.textContent='Skip';remove.title='Discard this region and review the next one';remove.disabled=busy||region.status==='Added';
+      remove.onclick=()=>work('Skipping region…',()=>skipRegion(i));
       row.append(button,remove);list.append(row);
     });
   };

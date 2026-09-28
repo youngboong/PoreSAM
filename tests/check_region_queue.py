@@ -7,12 +7,14 @@ import io
 import json
 import threading
 import time
+from types import SimpleNamespace
 from http.server import ThreadingHTTPServer
 import numpy as np
 from PIL import Image
 from playwright.sync_api import sync_playwright
 from analyze_candidates import measure_masks,export_folder
 from pore_editor import Editor,ROOT,make_handler,save_images
+from desktop_details import DesktopDetails
 
 
 def main():
@@ -56,6 +58,14 @@ def main():
             page=browser.new_page(viewport=dict(width=1700,height=1100));page.on('pageerror',lambda e:errors.append(str(e)))
             page.goto(f'http://127.0.0.1:{server.server_port}')
             page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
+            assert page.locator('#undo').count()==0
+            page.locator('#openPoreDetails').click();page.wait_for_function('!busy')
+            assert page.locator('#poreListRows tr').count()==4
+            bridge=DesktopDetails();bridge._main=SimpleNamespace(evaluate_js=page.evaluate)
+            details=bridge.details_state()
+            assert details['data']['revision']==0 and not details['stale']
+            details_key=details['key']
+            page.locator('#closePoreDetails').click()
             def point(x,y):
                 rect=page.locator('#image').bounding_box();return rect['x']+x*rect['width']/400,rect['y']+y*rect['height']/400
             def drag(x0,y0,x1,y1):
@@ -81,6 +91,19 @@ def main():
                 assert page.evaluate('state.candidates.length')==4+revision
                 assert page.evaluate("queuedRegions.filter(r=>r.status==='Added').length")==revision
                 assert not page.evaluate('state.report_ready')
+                assert page.evaluate('state.stats') is None
+                assert page.locator('#count').inner_text()=='4'
+                assert page.locator('#poreListRows tr').count()==4
+                snapshot=bridge.details_state(details_key)
+                assert snapshot['key']==details_key and snapshot['data'] is None and snapshot['stale'] and snapshot['busy']
+            page.locator('#refreshMeasurements').click();page.wait_for_function('!busy')
+            assert page.locator('#count').inner_text()=='8'
+            assert page.locator('#poreListRows tr').count()==4
+            page.locator('#openPoreDetails').click();page.wait_for_function('!busy')
+            assert page.locator('#poreListRows tr').count()==8
+            snapshot=bridge.details_state(details_key)
+            assert snapshot['data']['revision']==4 and not snapshot['stale']
+            page.locator('#closePoreDetails').click()
             page.keyboard.press('Control+z');page.wait_for_function('!busy && state.revision===5')
             assert page.evaluate('state.candidates.length')==7
             # Two mutually overlapping drafts: applying the first blocks the second.
@@ -95,8 +118,45 @@ def main():
             page.locator('#clear').click();drag(300,320,301,350);drag(310,320,350,350)
             page.locator('#predict').click();page.wait_for_function("!busy && queuedRegions.length===2 && queuedRegions[0].status==='Failed' && queuedRegions[1].status==='Ready'")
             assert page.evaluate('state.revision')==7
+            # Skip a failed box, then the active ready box, without saving or undoing pores.
+            page.locator('#regionQueueList .queued-region').first.locator('button').nth(1).click();page.wait_for_function('!busy')
+            assert page.evaluate('queuedRegions.length')==1
+            assert page.locator('#apply').is_enabled()
+            page.locator('#skipRegion').click();page.wait_for_function('!busy')
+            assert page.evaluate('queuedRegions.length')==0
+            assert page.evaluate('preview') is None
+            assert page.evaluate('state.revision')==7
+            assert not editor.state(dataset).get('queued_previews')
+            assert editor.state(dataset)['preview'] is None
+            # Skip an unpreviewed drawing as well.
+            drag(300,310,360,360)
+            page.locator('#skipRegion').click();page.wait_for_function('!busy')
+            assert page.evaluate('box') is None
+            # Deletion changes masks immediately while both measurement snapshots stay frozen.
+            page.locator('[data-mode=select]').click()
+            page.evaluate('window.selectPoreFromDetails(1)')
+            page.wait_for_function('!window.isPoreSelectionPending()')
+            page.locator('#delete').click();page.wait_for_function('!busy && state.revision===8')
+            assert 1 not in page.evaluate('state.candidates.map(c=>c.candidate_id)')
+            assert page.locator('#count').inner_text()=='8'
+            assert page.locator('#poreListRows tr').count()==8
+            page.locator('#openPoreDetails').click();page.wait_for_function('!busy')
+            assert page.locator('#poreListRows tr').count()==len(editor.state(dataset)['masks'])
+            assert page.locator('#poreListRows tr[data-id="1"]').count()==0
+            page.locator('#closePoreDetails').click()
+            page.locator('#refreshMeasurements').click();page.wait_for_function('!busy')
+            assert page.locator('#count').inner_text()==str(len(editor.state(dataset)['masks']))
+            # Horizontal scale: the second click's y is ignored, in either x direction.
+            page.evaluate('async(id)=>{await showProject(await api("project",{project_id:id}));showPanel("setup")}',project['id'])
+            for x0,x1 in [(60,260),(260,60)]:
+                page.locator('#measureScale').click()
+                rect=page.locator('#setupCanvas').bounding_box()
+                def scale_point(x,y):return rect['x']+x*rect['width']/400,rect['y']+y*rect['height']/400
+                page.mouse.click(*scale_point(x0,100));page.mouse.click(*scale_point(x1,170))
+                assert abs(float(page.locator('#scalePixels').input_value())-200)<1
+                assert page.evaluate('scalePoints[0][1]===scalePoints[1][1]')
             assert not errors,errors
-            print('PASS: mixed region queue, out-of-order review, individual saves, undo, overlap refresh and trimming')
+            print('PASS: region queue, skip, deferred details/summary, add/delete/undo, overlaps and horizontal scale')
             print(run)
             browser.close()
     finally:server.shutdown()

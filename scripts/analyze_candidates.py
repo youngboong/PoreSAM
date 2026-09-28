@@ -10,6 +10,7 @@ import pandas as pd
 from PIL import Image
 from skimage.measure import perimeter_crofton
 from result_paths import read_artifact
+from pore_extra_metrics import extra_metrics, EXTRA_COLUMNS
 
 
 def current_report_exists(folder):
@@ -21,7 +22,9 @@ def current_report_exists(folder):
         return False
 
 
-def measure_masks(masks, shape, um_per_pixel, grid=(3, 4)):
+def measure_masks(masks, shape, um_per_pixel, grid=(3, 4), gray=None):
+    if gray is not None and (gray.shape != shape or not np.isfinite(gray).all() or (gray < 0).any()):
+        raise ValueError('Expected finite nonnegative grayscale values with the mask dimensions.')
     h, w = shape
     union = np.zeros(shape, dtype=bool)
     shared = np.zeros(shape,dtype=bool)
@@ -43,7 +46,8 @@ def measure_masks(masks, shape, um_per_pixel, grid=(3, 4)):
         edge = bool(mask[0].any() or mask[-1].any() or mask[:, 0].any() or mask[:, -1].any())
         cy, cx = float(yy.mean()), float(xx.mean())
         dx,dy=xx-cx,yy-cy
-        eigenvalues=np.linalg.eigvalsh([[np.mean(dx*dx),np.mean(dx*dy)],[np.mean(dx*dy),np.mean(dy*dy)]])
+        covariance=np.array([[np.mean(dx*dx),np.mean(dx*dy)],[np.mean(dx*dy),np.mean(dy*dy)]])
+        eigenvalues=np.linalg.eigvalsh(covariance)
         minor,major=4*np.sqrt(np.maximum(eigenvalues,0))
         length_um,width_um=float(major*um_per_pixel),float(minor*um_per_pixel)
         aspect_ratio=float(major/minor) if minor>0 else None
@@ -59,12 +63,13 @@ def measure_masks(masks, shape, um_per_pixel, grid=(3, 4)):
                          touches_image_edge=edge, included_in_size_distribution=not edge,
                          centroid_x_pixels=cx, centroid_y_pixels=cy,
                          centroid_x_um=cx*um_per_pixel, centroid_y_um=cy*um_per_pixel,
-                         grid_row=gy+1, grid_column=gx+1, review_status="unreviewed"))
+                         grid_row=gy+1, grid_column=gx+1, review_status="unreviewed", complete=not edge,
+                         **extra_metrics(cropped, yy, xx, covariance, um_per_pixel, gray)))
     columns = ["candidate_id", "area_pixels", "area_um2", "equivalent_diameter_um", "perimeter_um", "circularity", "circularity_raw", "touches_image_edge",
                "length_um", "width_um", "aspect_ratio", "roundness", "roundness_raw",
                "included_in_size_distribution", "centroid_x_pixels", "centroid_y_pixels", "centroid_x_um",
                "centroid_y_um", "grid_row", "grid_column", "review_status"]
-    frame = pd.DataFrame(rows, columns=columns)
+    frame = pd.DataFrame(rows, columns=columns+EXTRA_COLUMNS)
     interior = frame[frame["included_in_size_distribution"].astype(bool)]
     analyzed_area = h*w*um_per_pixel**2
     union_area = int(union.sum())*um_per_pixel**2
@@ -117,7 +122,7 @@ def export_folder(folder):
     gray = np.asarray(source)[:report["analysis_bottom_exclusive"]]
     with np.load(read_artifact(folder, "entrance_candidates.npz"), allow_pickle=False) as data:
         masks = [(int(k.split("_")[-1]), data[k]) for k in sorted(data.files, key=lambda k:int(k.split("_")[-1]))]
-    table, stats, union, counts, complete_counts = measure_masks(masks, gray.shape, report["scale"]["um_per_pixel"])
+    table, stats, union, counts, complete_counts = measure_masks(masks, gray.shape, report["scale"]["um_per_pixel"], gray=gray)
     if len(table) != report["entrance_candidate_count"]:
         raise ValueError("Mask count differs from segmentation report")
     stats["image"] = report["image"]

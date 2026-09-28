@@ -320,3 +320,26 @@ python tests/check_automate_merge.py
 출력: `outputs/ui_checks/automate_merge_<시각>/verification.json`. 누락 탐색 32개 상한, 점수 기준, 병합·trim·수동 Cut 보호·Undo·Stop 동작을 검사한다.
 
 데스크톱 검증은 `outputs/desktop_checks/`, UI 회귀 검증은 `outputs/ui_checks/`에 저장된다. [tests/README.md](tests/README.md)에 실행 명령을 정리했다.
+
+## 9. 별도 파인튜닝
+
+학습 코드는 앱 실행 코드와 분리해 `fine_tuning/`에서 관리한다. GPU용 `pore` 환경에서 프로젝트 루트를 기준으로 실행한다.
+
+```powershell
+conda activate pore
+python fine_tuning/cross_validate.py
+```
+
+`fine_tuning/datasets/260917_v1/`의 검토된 마스크를 사용해 5-fold 교차검증을 실행하고, 마지막에 전체 데이터 재학습본을 만든다. 모델은 `fine_tuning/models/<실험명>/`, 로그·지표·비교 그림·HTML은 `fine_tuning/runs/<실험명>/`에 저장한다. 기존 앱의 체크포인트는 교체하지 않는다.
+
+데이터 준비, 검증 기준과 저장 파일은 [fine_tuning/README.md](fine_tuning/README.md)를 참고한다.
+
+16장을 한 장씩 제외하는 **15장 학습 / 1장 평가**와 면적 중심 비교는 다음으로 실행한다.
+
+```powershell
+python fine_tuning/leave_one_out.py
+```
+
+출력: `fine_tuning/runs/loo16_area_<시각>/index.html`과 `area_metrics.csv`. 각 `fold_N/area_evaluation/`의 `comparison.png`는 전체 비교, `area_errors_comparison.png`는 두 색의 오차 비교다. **하늘색은 놓친 reference 면적, 분홍색은 reference 밖으로 잘못 채운 면적**이다. 모델은 `fine_tuning/models/loo16_area_<시각>/fold_N.pt`에 각각 저장된다.
+
+학습·평가 모두 밝기 정규화를 적용한다. 주 지표는 전체 pore 영역 IoU이며, 개수 기준 F1이 아닌 픽셀 기준 면적 지표를 사용한다. 서로 비슷한 촬영 이미지가 학습·평가에 나뉠 수 있으므로 새 시편에 대한 독립 검증으로 해석하지 않는다.

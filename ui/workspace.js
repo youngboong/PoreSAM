@@ -22,13 +22,14 @@ function beginStopOperation(buttonId,label,notice){
 const setupCanvas=$('setupCanvas'),setupContext=setupCanvas.getContext('2d');
 function showPanel(name){
   if(!['load','setup','editor','analysis'].includes(name))return;
-  if(['editor','analysis'].includes(name)&&!state)return;
+  if(name==='editor'&&!state)return;
   if(name==='setup'&&!setupProject)return;
   for(const panel of ['load','setup','editor','analysis'])$(panel+'Panel').classList.toggle('hidden',panel!==name);
   document.querySelectorAll('.steps [data-panel]').forEach(b=>{b.classList.toggle('active',b.dataset.panel===name);if(b.dataset.panel===name)b.setAttribute('aria-current','step');else b.removeAttribute('aria-current')});
   if(name==='editor'){draw();window.onComparisonVisible?.()}
   else window.closePoreDetails?.();
   if(name==='load')setLoadMode('new');
+  if(name==='analysis')window.openReportComposer?.();
   window.scrollTo(0,0);
 }
 window.updateWorkspaceControls=()=>{document.querySelector('[data-panel="setup"]').disabled=busy||(!setupProject&&!state);window.activeStopOperation?.render()};
@@ -123,6 +124,7 @@ async function showProject(project){
   $('setupImageTitle').textContent=project.name;
   $('imageDetails').textContent=project.width+' × '+project.height+'px · '+project.original_dtype+(project.normalization?' · 8-bit preview':'');
   $('analysisBottom').max=project.height;$('bottomSlider').max=project.height;
+  $('optionalProcessing').open=false;
   const c=project.config;
   $('analysisBottom').value=$('bottomSlider').value=c.analysis_bottom;
   $('scaleUm').value=c.scale_um??'';$('scalePixels').value=c.scale_pixels??'';
@@ -145,9 +147,10 @@ $('uploadFile').onchange=()=>workspaceWork('Loading image…',async()=>{
 async function prepareExisting(dataset){await showProject(await api('import-existing',{dataset}))}
 for(const id of ['analysisBottom','bottomSlider'])$(id).oninput=()=>{if(!setupProject)return;const value=$(id).value;$('analysisBottom').value=$('bottomSlider').value=value;updateCalibration();drawSetup();invalidatePreprocessing()};
 for(const id of ['scaleUm','scalePixels','minArea'])$(id).oninput=()=>{if(setupProject)updateCalibration();if(id!=='minArea')$('scaleConfirmed').checked=false};
-$('resetCriteria').onclick=()=>{$('minContrast').value=8;$('minArea').value=100;$('pointDensity').value=48;$('normalizeEnabled').checked=true;$('backgroundStrength').value=0;$('blurMethod').value='none';$('blurStrength').value=2;invalidatePreprocessing();if(setupProject)updateCalibration()};
+$('resetCriteria').onclick=()=>{$('optionalProcessing').open=false;$('minContrast').value=8;$('minArea').value=100;$('pointDensity').value=48;$('normalizeEnabled').checked=true;$('backgroundStrength').value=0;$('blurMethod').value='none';$('blurStrength').value=2;invalidatePreprocessing();if(setupProject)updateCalibration()};
 function preprocessingPayload(){return {analysis_bottom:Number($('analysisBottom').value),preprocessing_mode:'adjustable',normalize_enabled:$('normalizeEnabled').checked,background_strength:Number($('backgroundStrength').value),blur_method:$('blurMethod').value,blur_strength:Number($('blurStrength').value)}}
 function updateSettingsSummary(){
+  const optional=[];if(Number($('backgroundStrength').value)>0)optional.push('Background on');if($('blurMethod').value!=='none'&&Number($('blurStrength').value)>0)optional.push('Blur on');$('optionalProcessingStatus').textContent=optional.join(' · ');
   $('analysisSettingsSummary').textContent='Normalization '+($('normalizeEnabled').checked?'On':'Off')+' · Background '+$('backgroundStrength').value+' · '+$('blurMethod').selectedOptions[0].textContent;
 }
 for(const id of ['minContrast','minArea','pointDensity'])$(id).addEventListener('input',updateSettingsSummary);
@@ -175,13 +178,14 @@ async function refreshPreprocessing(){
   finally{previewInFlight=false;if(previewPending)refreshPreprocessing();}
 }
 for(const id of ['normalizeEnabled','backgroundStrength','blurMethod','blurStrength'])$(id).addEventListener('input',invalidatePreprocessing);
-$('measureScale').onclick=()=>{if(!setupProject){jobMessage('Choose an image first.',true);return}measuringScale=!measuringScale;scalePoints=[];$('measureScale').classList.toggle('active',measuringScale);drawSetup();jobMessage('Click both ends of the scale bar.')};
+$('measureScale').onclick=()=>{if(!setupProject){jobMessage('Choose an image first.',true);return}measuringScale=!measuringScale;scalePoints=[];$('measureScale').classList.toggle('active',measuringScale);drawSetup();jobMessage('Click both ends of the scale bar. Measurement is horizontal.')};
 $('scaleConfirmed').onchange=()=>{if($('scaleConfirmed').checked)jobMessage('Ready to analyze.')};
 setupCanvas.onclick=event=>{
   if(busy||!setupProject||!measuringScale)return;
   const r=setupCanvas.getBoundingClientRect(),x=Math.max(0,Math.min(setupCanvas.width-1,(event.clientX-r.left)*setupCanvas.width/r.width)),y=Math.max(0,Math.min(setupCanvas.height-1,(event.clientY-r.top)*setupCanvas.height/r.height));
-  scalePoints.push([x,y]);
-  if(scalePoints.length===2){$('scalePixels').value=Math.hypot(scalePoints[1][0]-scalePoints[0][0],scalePoints[1][1]-scalePoints[0][1]).toFixed(2);measuringScale=false;$('measureScale').classList.remove('active');$('scaleConfirmed').checked=false;updateCalibration();jobMessage('Enter the scale length in µm and confirm.')}
+  if(scalePoints.length&&Math.abs(x-scalePoints[0][0])<1){jobMessage('Choose an endpoint at least 1 pixel away horizontally.',true);return}
+  scalePoints.push([x,scalePoints.length?scalePoints[0][1]:y]);
+  if(scalePoints.length===2){$('scalePixels').value=Math.abs(scalePoints[1][0]-scalePoints[0][0]).toFixed(2);measuringScale=false;$('measureScale').classList.remove('active');$('scaleConfirmed').checked=false;updateCalibration();jobMessage('Enter the scale length in µm and confirm.')}
   drawSetup();
 };
 function analysisDuration(seconds){
@@ -249,7 +253,7 @@ window.onEditorAccepted=data=>{
   $('editorImageName').textContent=imageName;
   $('editorImageName').title=imageName;
   $('analysisTitle').textContent='Generate Report · '+imageName;
-  $('analysisSubtitle').textContent=data.stats.candidate_count+' pores · Area fraction (2D) '+data.stats.candidate_union_area_percent.toFixed(2)+'%';
+  $('analysisSubtitle').textContent=data.candidates.length+' pores'+(data.stats?' · Area fraction (2D) '+data.stats.candidate_union_area_percent.toFixed(2)+'%':' · Generate report for current measurements');
   const ready=Boolean(data.report_ready??data.report_url);
   $('analysisFrame').classList.toggle('hidden',!ready);$('analysisComparison').closest('section').classList.toggle('hidden',!ready);
   if(ready){$('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url}

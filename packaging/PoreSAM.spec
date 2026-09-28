@@ -1,14 +1,19 @@
 # Build on Windows: python -m PyInstaller packaging/PoreSAM.spec --noconfirm
 from pathlib import Path
 import os
+import json
 import torch
 from PyInstaller.utils.hooks import collect_data_files,collect_submodules,copy_metadata
 root=Path(SPECPATH).parent
 if torch.version.cuda is not None:raise SystemExit('Build in the CPU-only pore-app-cpu environment; see DESKTOP.md.')
 os.environ['MPLCONFIGDIR']=str(root/'build/matplotlib-cache')
-weights=root/'checkpoints/sam2.1_hiera_small.pt'
+manifest=root/'checkpoints/default_model.json'
+name=json.loads(manifest.read_text(encoding='utf-8'))['checkpoint'] if manifest.is_file() else 'sam2.1_hiera_small.pt'
+if not isinstance(name,str) or Path(name).name!=name or not name.endswith('.pt'):raise SystemExit('Invalid default checkpoint filename.')
+weights=root/'checkpoints'/name
 if not weights.is_file():raise SystemExit('Place SAM 2.1 Small at '+str(weights))
 datas=[(str(root/'ui'),'ui'),(str(weights),'checkpoints')]
+if manifest.is_file():datas.append((str(manifest),'checkpoints'))
 datas+=collect_data_files('sam2')+copy_metadata('SAM-2')
 hidden=collect_submodules('sam2')+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
 a=Analysis([str(root/'scripts/pore_app.py')],pathex=[str(root/'scripts')],binaries=[],datas=datas,hiddenimports=hidden,

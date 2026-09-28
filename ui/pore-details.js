@@ -1,42 +1,31 @@
 (() => {
   const dialog=$('poreDetailsDialog'),plot=$('detailsPlot'),ctx=plot.getContext('2d');
-  const metrics=[
-    ['length_um','Length (µm)'],['width_um','Width (µm)'],['aspect_ratio','Aspect ratio'],
-    ['equivalent_diameter_um','Equivalent diameter (µm)'],['roundness','Roundness'],
-    ['area_um2','Area (µm²)'],['circularity','Circularity'],['image_area_percent','Area fraction (%)']
-  ];
-  const tableMetrics=[...metrics.slice(0,5),metrics.find(([key])=>key==='image_area_percent')],labels=Object.fromEntries(metrics);
+  const metrics=window.poreColumnCatalog.filter(item=>!item[3]),labels=Object.fromEntries(metrics.map(([key,label])=>[key,label]));
+  const tableColumns=window.createPoreColumnPicker(()=>{sortKey='candidate_id';sortAscending=true;renderTable()});
   const format=value=>value==null||!Number.isFinite(value)?'—':value.toLocaleString(undefined,{maximumFractionDigits:3,minimumFractionDigits:3});
   let data=null,selectedIds=new Set(),allSelected=true,view='table',points=[],bars=[],plotRows=[],lastPlot=null;
   const selectedRows=()=>data?data.candidates.filter(row=>selectedIds.has(row.candidate_id)):[];
   const valid=value=>typeof value==='number'&&Number.isFinite(value);
   let sortKey='candidate_id',sortAscending=true;
-  const sortHeaders=[...$('poreTable').querySelectorAll('thead th')];
-  const sortColumns=[['candidate_id','ID'],...tableMetrics];
   const sortedRows=()=>selectedRows().sort((a,b)=>{
-    const av=a[sortKey],bv=b[sortKey],aValid=valid(av),bValid=valid(bv);
+    const av=a[sortKey],bv=b[sortKey],aValid=valid(av)||typeof av==='boolean',bValid=valid(bv)||typeof bv==='boolean';
     // Missing measurements stay last in either direction; ties keep stable IDs.
     if(aValid!==bValid)return aValid?-1:1;
     return (aValid&&av!==bv?(av-bv)*(sortAscending?1:-1):a.candidate_id-b.candidate_id);
   });
   function renderSortHeaders(){
-    sortHeaders.forEach((header,i)=>{
-      const [key,label]=sortColumns[i],active=key===sortKey;
-      header.setAttribute('aria-sort',active?(sortAscending?'ascending':'descending'):'none');
-      header.querySelector('.sort-direction').textContent=active?(sortAscending?'▲':'▼'):'↕';
-      const button=header.querySelector('button'),next=active&&sortAscending?'descending':'ascending';
-      button.setAttribute('aria-label',label+': sort '+next);
-      button.title='Sort '+next;
-    });
+    const row=document.createElement('tr');
+    for(const [key,label,help] of tableColumns()){
+      const header=document.createElement('th'),button=document.createElement('button'),active=sortKey===key;
+      header.scope='col';header.title=help;header.setAttribute('aria-sort',active?(sortAscending?'ascending':'descending'):'none');
+      button.type='button';button.className='details-sort';button.dataset.sortKey=key;
+      button.textContent=label+' '+(active?(sortAscending?'▲':'▼'):'↕');
+      button.setAttribute('aria-label',label+': sort '+(active&&sortAscending?'descending':'ascending'));
+      button.onclick=()=>{sortAscending=sortKey===key?!sortAscending:true;sortKey=key;renderTable()};
+      header.append(button);row.append(header);
+    }
+    $('poreTable').querySelector('thead').replaceChildren(row);
   }
-  sortHeaders.forEach((header,i)=>{
-    const [key]=sortColumns[i],button=document.createElement('button'),label=document.createElement('span'),arrow=document.createElement('span');
-    button.type='button';button.className='details-sort';button.dataset.sortKey=key;
-    label.textContent=header.textContent;arrow.className='sort-direction';arrow.setAttribute('aria-hidden','true');
-    button.append(label,arrow);header.replaceChildren(button);header.scope='col';
-    button.onclick=()=>{sortAscending=sortKey===key?!sortAscending:true;sortKey=key;renderTable()};
-  });
-  renderSortHeaders();
   function statistics(rows,key){
     const values=rows.map(row=>row[key]).filter(valid),n=values.length;
     if(!n)return {n:0,min:null,max:null,mean:null,std:null};
@@ -58,15 +47,27 @@
     for(const candidate of sortedRows()){
       const row=document.createElement('tr');row.dataset.id=candidate.candidate_id;row.tabIndex=0;
       row.classList.toggle('selected',highlight.has(candidate.candidate_id));row.setAttribute('aria-selected',String(highlight.has(candidate.candidate_id)));
-      const id=document.createElement('td');id.textContent=candidate.candidate_id+(candidate.touches_image_edge?' †':'');
-      id.title=({manual_polygon:'Manual polygon',prompted_sam:'Prompted SAM',manual_cut:'Cut',automatic:'Automatic'})[candidate.source]??'Manual edit';row.append(id);
-      tableMetrics.forEach(([key])=>{const cell=document.createElement('td');cell.textContent=format(candidate[key]);row.append(cell)});
+      for(const [key,,help,type] of tableColumns()){
+        const cell=document.createElement('td');cell.title=help;
+        cell.textContent=type==='id'?candidate.candidate_id+(candidate.touches_image_edge?' †':''):type==='boolean'?(candidate[key]==null?'—':candidate[key]?'Yes':'No'):format(candidate[key]);
+        row.append(cell);
+      }
       row.onclick=event=>window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey);
       row.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();window.selectPoreFromDetails?.(candidate.candidate_id,event.ctrlKey)}};
       fragment.append(row);
     }
-    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=tableMetrics.length+1;cell.textContent='No pores selected.';row.append(cell);fragment.append(row)}
-    $('poreListRows').replaceChildren(fragment);$('poreDetailsStats').replaceChildren(statRows(selectedRows(),tableMetrics));
+    if(!fragment.childNodes.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=tableColumns().length;cell.textContent='No pores selected.';row.append(cell);fragment.append(row)}
+    $('poreListRows').replaceChildren(fragment);
+    const footer=document.createDocumentFragment(),columns=tableColumns();
+    for(const name of ['min','max','mean','std']){
+      const row=document.createElement('tr');
+      columns.forEach(([key,,help,type],index)=>{
+        const cell=document.createElement('td');
+        if(index===0){const label=document.createElement('strong');label.className='stat-label';label.textContent=name+' ';cell.append(label)}
+        cell.append(document.createTextNode(type?'':format(statistics(selectedRows(),key)[name])));cell.title=help;row.append(cell);
+      });footer.append(row);
+    }
+    $('poreDetailsStats').replaceChildren(footer);
   }
   function renderTargets(){
     const fragment=document.createDocumentFragment(),search=$('detailsTargetSearch').value.trim();
@@ -81,7 +82,8 @@
   function update(){
     const rows=selectedRows();$('detailsTargetCount').textContent='('+rows.length+'/'+(data?.candidates.length??0)+')';
     $('detailsSummary').textContent='Selected: '+rows.length+' · Image area fraction (2D): '+format(data?.stats.candidate_union_area_percent)+'%';
-    const highlighted=window.getHighlightedPore?.();if(highlighted!=null&&!selectedIds.has(highlighted))window.clearPoreHighlight?.();
+    // The table filter controls measurements shown here, not the editor's
+    // selection. Hidden rows must never deselect pores in the image.
     renderTable();if(view!=='table')drawPlot();
   }
   function extent(values){
@@ -89,22 +91,49 @@
     if(lo===hi){const d=Math.max(Math.abs(lo)*.05,.5);lo-=d;hi+=d;}
     return [lo,hi];
   }
+  function readableAxis(lo,hi,integer=false){
+    const raw=(hi-lo)/5,power=10**Math.floor(Math.log10(raw));
+    let step=[1,2,5,10].map(v=>v*power).find(v=>v>=raw);
+    if(integer)step=Math.max(1,step);
+    const start=Math.floor(lo/step)*step,end=Math.ceil(hi/step)*step;
+    const digits=Math.max(0,-Math.floor(Math.log10(step)));
+    const ticks=Array.from({length:Math.round((end-start)/step)+1},(_,i)=>{
+      const value=Number((start+i*step).toPrecision(12));
+      const label=value===0?'0':Math.abs(value)>=1e6||Math.abs(value)<1e-3?value.toExponential(2).replace(/\.?0+e/,'e'):value.toLocaleString('en-US',{maximumFractionDigits:Math.min(12,digits)});
+      return {value,label};
+    });
+    return {range:[start,end],ticks};
+  }
+  const plotWidth=1100,plotHeight=620;
   const frame={left:100,top:68,width:950,height:455};
-  function axes(xRange,yRange,xLabel,yLabel,title){
-    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,plot.width,plot.height);
-    ctx.fillStyle='#334155';ctx.font='bold 22px sans-serif';ctx.textAlign='center';ctx.fillText(title,plot.width/2,32);
+  function resizePlot(){
+    const rect=plot.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+    const width=Math.max(1,Math.round(rect.width*dpr)),height=Math.max(1,Math.round(rect.height*dpr));
+    if(plot.width!==width)plot.width=width;
+    if(plot.height!==height)plot.height=height;
+    ctx.setTransform(width/plotWidth,0,0,height/plotHeight,0,0);
+  }
+  function axes(xRange,yRange,xLabel,yLabel,title,xTicks=null,yTicks=null){
+    ctx.fillStyle='#ffffff';ctx.fillRect(0,0,plotWidth,plotHeight);
+    ctx.fillStyle='#334155';ctx.font='bold 22px sans-serif';ctx.textAlign='center';ctx.fillText(title,plotWidth/2,32);
     ctx.font='16px sans-serif';
-    for(let i=0;i<=5;i++){
-      const x=frame.left+i*frame.width/5,y=frame.top+frame.height-i*frame.height/5;
-      ctx.strokeStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(x,frame.top);ctx.lineTo(x,frame.top+frame.height);ctx.moveTo(frame.left,y);ctx.lineTo(frame.left+frame.width,y);ctx.stroke();
-      ctx.fillStyle='#64748b';ctx.textAlign='center';ctx.fillText(Number((xRange[0]+i*(xRange[1]-xRange[0])/5).toPrecision(4)).toString(),x,frame.top+frame.height+27);
-      ctx.textAlign='right';ctx.fillText(Number((yRange[0]+i*(yRange[1]-yRange[0])/5).toPrecision(4)).toString(),frame.left-12,y+5);
+    const fallback=range=>Array.from({length:6},(_,i)=>{const value=range[0]+i*(range[1]-range[0])/5;return {value,label:Number(value.toPrecision(4)).toString()}});
+    for(const tick of xTicks??fallback(xRange)){
+      const x=frame.left+(tick.value-xRange[0])/(xRange[1]-xRange[0])*frame.width;
+      ctx.strokeStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(x,frame.top);ctx.lineTo(x,frame.top+frame.height);ctx.stroke();
+      ctx.fillStyle='#64748b';ctx.textAlign='center';ctx.fillText(tick.label,x,frame.top+frame.height+27);
+    }
+    for(const tick of yTicks??fallback(yRange)){
+      const y=frame.top+frame.height-(tick.value-yRange[0])/(yRange[1]-yRange[0])*frame.height;
+      ctx.strokeStyle='#e2e8f0';ctx.beginPath();ctx.moveTo(frame.left,y);ctx.lineTo(frame.left+frame.width,y);ctx.stroke();
+      ctx.fillStyle='#64748b';ctx.textAlign='right';ctx.fillText(tick.label,frame.left-12,y+5);
     }
     ctx.strokeStyle='#94a3b8';ctx.strokeRect(frame.left,frame.top,frame.width,frame.height);
-    ctx.fillStyle='#334155';ctx.textAlign='center';ctx.fillText(xLabel,frame.left+frame.width/2,plot.height-26);
+    ctx.fillStyle='#334155';ctx.textAlign='center';ctx.fillText(xLabel,frame.left+frame.width/2,plotHeight-26);
     ctx.save();ctx.translate(25,frame.top+frame.height/2);ctx.rotate(-Math.PI/2);ctx.fillText(yLabel,0,0);ctx.restore();
   }
   function drawPlot(){
+    resizePlot();
     points=[];bars=[];const xKey=$('detailsXAxis').value,yKey=$('detailsYAxis').value;
     const rows=selectedRows();plotRows=rows.filter(row=>valid(row[xKey])&&(view!=='scatter'||valid(row[yKey])));
     const columns=view==='scatter'?[[xKey,labels[xKey]],[yKey,labels[yKey]]]:[[xKey,labels[xKey]]];
@@ -112,25 +141,31 @@
     columns.forEach(([,label])=>{const th=document.createElement('th');th.textContent=label;header.append(th)});
     $('detailsPlotStats').replaceChildren(header,statRows(plotRows,columns));
     $('detailsPlotInfo').textContent='Showing '+plotRows.length+' / Selected: '+rows.length+''+(view==='scatter'?'':'');
-    if(!plotRows.length){ctx.fillStyle='white';ctx.fillRect(0,0,plot.width,plot.height);ctx.fillStyle='#64748b';ctx.font='22px sans-serif';ctx.textAlign='center';ctx.fillText('No valid values.',plot.width/2,plot.height/2);lastPlot={type:view,count:0};return;}
+    if(!plotRows.length){ctx.fillStyle='white';ctx.fillRect(0,0,plotWidth,plotHeight);ctx.fillStyle='#64748b';ctx.font='22px sans-serif';ctx.textAlign='center';ctx.fillText('No valid values.',plotWidth/2,plotHeight/2);lastPlot={type:view,count:0};return;}
     const xRange=extent(plotRows.map(row=>row[xKey]));
-    const x=v=>frame.left+(v-xRange[0])/(xRange[1]-xRange[0])*frame.width;
     if(view==='histogram'){
-      const n=$('detailsBins').value==='auto'?Math.min(40,Math.max(1,Math.ceil(Math.sqrt(plotRows.length)))):Number($('detailsBins').value);
-      const binWidth=(xRange[1]-xRange[0])/n,counts=Array(n).fill(0);
-      plotRows.forEach(row=>counts[Math.min(n-1,Math.max(0,Math.floor((row[xKey]-xRange[0])/binWidth)))]++);
-      const top=Math.max(...counts,1);axes(xRange,[0,top],labels[xKey],'Count','Histogram');
+      const targetBins=$('detailsBins').value==='auto'?Math.min(40,Math.max(1,Math.ceil(Math.sqrt(plotRows.length)))):Number($('detailsBins').value);
+      const lo=Math.floor(Math.min(...plotRows.map(row=>row[xKey]))),hi=Math.max(...plotRows.map(row=>row[xKey]));
+      const binWidth=Math.max(1,Math.ceil((hi-lo)/targetBins)),n=Math.max(1,Math.ceil((hi-lo)/binWidth));
+      const edges=Array.from({length:n+1},(_,i)=>lo+i*binWidth),counts=Array(n).fill(0);
+      plotRows.forEach(row=>counts[Math.min(n-1,Math.max(0,Math.floor((row[xKey]-lo)/binWidth)))]++);
+      const tickEvery=Math.max(1,Math.ceil(n/6));
+      const xAxis={range:[edges[0],edges[n]],ticks:edges.filter((_,i)=>i%tickEvery===0||i===n).map(value=>({value,label:value.toLocaleString('en-US')}))},yAxis=readableAxis(0,Math.max(...counts,1)*1.1,true),top=yAxis.range[1];
+      const histX=v=>frame.left+(v-xAxis.range[0])/(xAxis.range[1]-xAxis.range[0])*frame.width;
+      axes(xAxis.range,yAxis.range,labels[xKey],'Count','Histogram',xAxis.ticks,yAxis.ticks);
       counts.forEach((count,i)=>{
-        const left=x(xRange[0]+i*binWidth),width=frame.width/n,height=count/top*frame.height,y=frame.top+frame.height-height;
+        const left=histX(edges[i]),width=binWidth/(xAxis.range[1]-xAxis.range[0])*frame.width,height=count/top*frame.height,y=frame.top+frame.height-height;
         ctx.fillStyle='#2563eb';ctx.fillRect(left+1,y,Math.max(1,width-2),height);
-        bars.push({x:left,y,width,height,count,lo:xRange[0]+i*binWidth,hi:xRange[0]+(i+1)*binWidth});
+        bars.push({x:left,y,width,height,count,lo:edges[i],hi:edges[i+1]});
       });
-      lastPlot={type:view,count:plotRows.length,counts,xKey};
+      lastPlot={type:view,count:plotRows.length,counts,edges,xKey,xAxis,yAxis};
     }else{
-      const yRange=extent(plotRows.map(row=>row[yKey])),y=v=>frame.top+frame.height-(v-yRange[0])/(yRange[1]-yRange[0])*frame.height;
-      axes(xRange,yRange,labels[xKey],labels[yKey],'Scatter plot');
-      for(const row of plotRows){const px=x(row[xKey]),py=y(row[yKey]);ctx.beginPath();ctx.arc(px,py,6,0,2*Math.PI);ctx.fillStyle='#2563eb';ctx.fill();ctx.strokeStyle='white';ctx.lineWidth=1;ctx.stroke();points.push({x:px,y:py,row})}
-      lastPlot={type:view,count:plotRows.length,xKey,yKey};
+      const xAxis=readableAxis(...xRange),yAxis=readableAxis(...extent(plotRows.map(row=>row[yKey])));
+      const scatterX=v=>frame.left+(v-xAxis.range[0])/(xAxis.range[1]-xAxis.range[0])*frame.width;
+      const y=v=>frame.top+frame.height-(v-yAxis.range[0])/(yAxis.range[1]-yAxis.range[0])*frame.height;
+      axes(xAxis.range,yAxis.range,labels[xKey],labels[yKey],'Scatter plot',xAxis.ticks,yAxis.ticks);
+      for(const row of plotRows){const px=scatterX(row[xKey]),py=y(row[yKey]);ctx.beginPath();ctx.arc(px,py,6,0,2*Math.PI);ctx.fillStyle='#2563eb';ctx.fill();ctx.strokeStyle='white';ctx.lineWidth=1;ctx.stroke();points.push({x:px,y:py,row})}
+      lastPlot={type:view,count:plotRows.length,xKey,yKey,xAxis,yAxis};
     }
   }
   function switchView(next){
@@ -149,21 +184,27 @@
   $('detailsSelectAll').onclick=()=>{selectedIds=new Set((data?.candidates??[]).map(row=>row.candidate_id));allSelected=true;renderTargets();update()};
   $('detailsSelectNone').onclick=()=>{selectedIds.clear();allSelected=false;renderTargets();update()};
   window.renderPoreDetails=next=>{
+    $('poreDetailsTitle').textContent='Pore Details';
     if(data?.dataset!==next.dataset){allSelected=true;sortKey='candidate_id';sortAscending=true;$('detailsTargetSearch').value='';}
     const previousIds=new Set(data?.candidates.map(row=>row.candidate_id)??[]);
     data=next;const ids=new Set(data.candidates.map(row=>row.candidate_id));
     selectedIds=allSelected?ids:new Set([...selectedIds].filter(id=>ids.has(id)).concat([...ids].filter(id=>!previousIds.has(id))));
     renderTargets();update();
   };
-  $('openPoreDetails').onclick=async()=>{
+  window.markPoreDetailsStale=next=>{
+    if(data&&(data.dataset!==next.dataset||data.revision!==next.revision))$('poreDetailsTitle').textContent='Pore Details · Click Pore Details to update';
+  };
+  $('openPoreDetails').onclick=()=>work('Updating pore details…',async()=>{
     if(!state)return;
+    window.detailsSnapshot=await measurementSnapshot();
+    window.renderPoreDetails(window.detailsSnapshot);
     if(!window.isDetachedDetails&&window.pywebview?.api?.open_details){
       try{await window.pywebview.api.open_details()}catch(error){setStatus(error.message,true)}
       return;
     }
-    window.renderPoreDetails(state);if(!dialog.open)dialog.show();update();
-  };
-  window.closePoreDetails=()=>{if(dialog.open)dialog.close();$('detailsTargetPicker').open=false};
+    if(!dialog.open)dialog.show();
+  });
+  window.closePoreDetails=()=>{if($('poreColumnsDialog').open)$('poreColumnsDialog').close();if(dialog.open)dialog.close();$('detailsTargetPicker').open=false};
   if(window.isDetachedDetails)window.closePoreDetails=()=>window.pywebview.api.close_details();
   $('closePoreDetails').onclick=window.closePoreDetails;
   dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();window.closePoreDetails();$('openPoreDetails').focus()}});
@@ -196,26 +237,34 @@
   }
   window.addEventListener('resize',()=>{if(!dialog.open)return;const rect=dialog.getBoundingClientRect();dialog.style.left=Math.max(0,Math.min(innerWidth-dialog.offsetWidth,rect.left))+'px';dialog.style.top=Math.max(0,Math.min(innerHeight-50,rect.top))+'px';dialog.style.right='auto'});
   }
-  const plotPoint=event=>{const r=plot.getBoundingClientRect();return {x:(event.clientX-r.left)*plot.width/r.width,y:(event.clientY-r.top)*plot.height/r.height}};
+  const plotPoint=event=>{const r=plot.getBoundingClientRect();return {x:(event.clientX-r.left)*plotWidth/r.width,y:(event.clientY-r.top)*plotHeight/r.height}};
   function nearest(point){return points.map(item=>({...item,d:Math.hypot(point.x-item.x,point.y-item.y)})).filter(item=>item.d<16).sort((a,b)=>a.d-b.d)[0]}
   plot.onpointermove=event=>{const point=plotPoint(event);if(view==='scatter'){const match=nearest(point);plot.title=match?'ID '+match.row.candidate_id+' · '+labels[$('detailsXAxis').value]+': '+format(match.row[$('detailsXAxis').value])+' · '+labels[$('detailsYAxis').value]+': '+format(match.row[$('detailsYAxis').value]):'';}else{const match=bars.find(bar=>point.x>=bar.x&&point.x<bar.x+bar.width);plot.title=match?format(match.lo)+' ~ '+format(match.hi)+' · '+match.count+'':''}};
   plot.onclick=event=>{if(view!=='scatter')return;const match=nearest(plotPoint(event));if(match){window.selectPoreFromDetails?.(match.row.candidate_id);drawPlot()}};
   function download(blob,name){const a=document.createElement('a'),url=URL.createObjectURL(blob);a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
   $('downloadDetails').onclick=()=>{
-    const columns=tableMetrics,rows=sortedRows(),lines=[['ID',...columns.map(([,label])=>label)]];
-    rows.forEach(row=>lines.push([row.candidate_id,...columns.map(([key])=>valid(row[key])?row[key]:'')]));
-    for(const name of ['min','max','mean','std'])lines.push([name,...columns.map(([key])=>statistics(rows,key)[name]??'')]);
+    const columns=tableColumns(),rows=sortedRows(),lines=[columns.map(([,label])=>label)];
+    rows.forEach(row=>lines.push(columns.map(([key,,,type])=>type==='boolean'?(row[key]==null?'':row[key]?'Yes':'No'):valid(row[key])?row[key]:'')));
+    lines.push([],['Statistic',...columns.map(([,label])=>label)]);
+    for(const name of ['min','max','mean','std'])lines.push([name,...columns.map(([key,,,type])=>type?'':statistics(rows,key)[name]??'')]);
     const text='\ufeff'+lines.map(row=>row.map(value=>'"'+String(value).replaceAll('"','""')+'"').join(',')).join('\r\n');
     download(new Blob([text],{type:'text/csv;charset=utf-8'}),'pore_details.csv');
   };
   $('downloadPlot').onclick=()=>work('Exporting plot…',async()=>{
     const kind=view,bins=$('detailsBins').value;
     try{
-      const result=await api('details-plot',{...payload(),candidate_ids:selectedRows().map(row=>row.candidate_id),kind,x_key:$('detailsXAxis').value,y_key:$('detailsYAxis').value,bins:bins==='auto'?'auto':Number(bins)});
+      const result=await api('details-plot',{dataset:data.dataset,revision:data.revision,candidate_ids:selectedRows().map(row=>row.candidate_id),kind,x_key:$('detailsXAxis').value,y_key:$('detailsYAxis').value,bins:bins==='auto'?'auto':Number(bins)});
       download(await (await fetch(result.image)).blob(),kind+'.png');
       $('detailsPlotInfo').textContent=result.count+' pores exported.';
     }catch(error){$('detailsPlotInfo').textContent=error.message;throw error;}
   });
+  let plotResizeFrame=null;
+  function schedulePlotResize(){
+    if(plotResizeFrame!==null)return;
+    plotResizeFrame=requestAnimationFrame(()=>{plotResizeFrame=null;if(view!=='table'&&plot.getBoundingClientRect().width)drawPlot()});
+  }
+  new ResizeObserver(schedulePlotResize).observe(plot);
+  window.addEventListener('resize',schedulePlotResize);
   // Expose the plotted counts for reproducible export/validation without modifying masks.
   window.poreDetailsPlotData=()=>lastPlot;
 })();

@@ -38,6 +38,9 @@ def main():
             time.sleep(.5)
         else:raise RuntimeError('EXE startup timeout')
         base='http://127.0.0.1:'+match[1]
+        for route, expected in [('/pore-columns.js', 'Available columns'), ('/pore-details-window', '/pore-columns.js'), ('/', 'Refresh measurements')]:
+            with urllib.request.urlopen(base+route) as response:
+                assert expected in response.read().decode('utf-8')
         def post(route,payload):
             request=urllib.request.Request(base+'/api/'+route,data=json.dumps(payload).encode(),headers={'Content-Type':'application/json','X-Pore-Editor':'1'})
             with urllib.request.urlopen(request,timeout=90) as response:return json.load(response)
@@ -74,6 +77,15 @@ def main():
         else:raise RuntimeError('CPU analysis timeout')
         dataset=status['dataset'];state=post('load',dict(dataset=dataset))
         assert state['candidates'],'No pore detected in the synthetic test image'
+        assert state['selection_settings']['method']=='two_stage_nested'
+        model_manifest=bundle/'_internal/checkpoints/default_model.json'
+        if model_manifest.is_file():
+            deployment=json.loads(model_manifest.read_text(encoding='utf-8'))
+            saved_report=next((run/'data/projects'/project['id']/'runs').glob('*/report.json'))
+            assert json.loads(saved_report.read_text())['checkpoint_sha256']==deployment['sha256']
+        assert all(key in state['candidates'][0] for key in ['angle_deg','solidity','brightness_mean','complete','mass_center_x_um'])
+        measured=post('measurements',dict(dataset=dataset,revision=state['revision']))
+        assert measured['candidates']==state['candidates']
         # Prompted SAM also loads bundled model/configs, independently of automatic masks.
         preview=post('predict',dict(dataset=dataset,revision=state['revision'],points=[],labels=[],box=[50,50,110,110]))
         assert preview['choices']

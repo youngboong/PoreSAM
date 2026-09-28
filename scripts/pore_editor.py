@@ -198,11 +198,36 @@ class Editor:
         return dict(masks=masks, annotations=meta["annotations"], history=meta["history"],
                     next_id=meta["next_id"], revision=revision, preview=None)
 
-    def response(self, state):
+    def measurements(self, state):
+        cached = state.get('measurements')
+        if cached is not None and cached['revision'] == state['revision']:
+            return cached
         ordered = sorted(state["masks"].items())
-        table, stats, _, _, _ = measure_masks(ordered, state["gray"].shape, state["report"]["scale"]["um_per_pixel"])
+        table, stats, _, _, _ = measure_masks(ordered, state["gray"].shape, state["report"]["scale"]["um_per_pixel"], gray=state['gray'])
         table['image_area_percent']=table['area_pixels']/(state['gray'].size)*100
         table['source']=table['candidate_id'].map(lambda i:state['annotations'].get(str(i),{}).get('source','automatic'))
+        cached = dict(dataset=state['dataset'], revision=state['revision'], stats=stats,
+                      candidates=table.astype(object).where(table.notna(),None).to_dict(orient='records'))
+        state['measurements'] = cached
+        return cached
+
+    def response(self, state, include_measurements=True):
+        ordered = sorted(state['masks'].items())
+        measured = self.measurements(state) if include_measurements else None
+        # Selection needs current IDs, areas, centroids and boundary flags, not a
+        # complete shape analysis. Compute these cheap fields without measure_masks.
+        candidates = []
+        scale = state['report']['scale']['um_per_pixel']
+        if measured is None:
+            for candidate_id, mask in ordered:
+                moments = cv2.moments(mask.astype(np.uint8), binaryImage=True)
+                area = int(moments['m00'])
+                edge = bool(mask[0].any() or mask[-1].any() or mask[:,0].any() or mask[:,-1].any())
+                candidates.append(dict(candidate_id=candidate_id, area_pixels=area, area_um2=area*scale**2,
+                    equivalent_diameter_um=2*np.sqrt(area*scale**2/np.pi),
+                    centroid_x_pixels=moments['m10']/area, centroid_y_pixels=moments['m01']/area,
+                    touches_image_edge=edge, included_in_size_distribution=not edge,
+                    source=state['annotations'].get(str(candidate_id),{}).get('source','automatic')))
         rgba = np.zeros((*state["gray"].shape,4), dtype=np.uint8)
         supplemental_rgba=np.zeros_like(rgba)
         fill_rgba=np.zeros_like(rgba)
@@ -231,7 +256,8 @@ class Editor:
         return dict(cut_paths_supported=True,dataset=state["dataset"],revision=state["revision"],width=state["gray"].shape[1],height=state["gray"].shape[0],
                     image=png_url(Image.fromarray(state["gray"])),overlay=png_url(Image.fromarray(rgba)),
                     supplemental_overlay=png_url(Image.fromarray(supplemental_rgba)),fill_overlay=png_url(Image.fromarray(fill_rgba)),edge_overlay=png_url(Image.fromarray(edge_rgba)),label_overlay=png_url(Image.fromarray(label_rgba)),
-                    stats=stats, candidates=table.astype(object).where(table.notna(),None).to_dict(orient="records"),can_undo=bool(state["history"]),report_url=report_url,
+                    stats=measured['stats'] if measured else None, candidates=measured['candidates'] if measured else candidates,
+                    measurements_current=measured is not None,can_undo=bool(state["history"]),report_url=report_url,
                     image_url=result_base+'/images/comparison.png' if report_ready else None,result_base=result_base,report_ready=report_ready,
                     export_default_directory=str(self.output_root.parent/'exports'),
                     selection_settings=state['report'].get('selection_settings',dict(min_contrast=8,min_area_pixels=100)),
@@ -412,10 +438,14 @@ class Editor:
         with publish_guard() if publish_guard else nullcontext():
             pending.replace(parent/"latest.json")
             state.update(masks=masks,annotations=annotations,history=history,next_id=next_id,revision=revision,preview=None)
-        return self.response(state)
+        return self.response(state, include_measurements=False)
 
     def generate_report(self,state,payload):
         self.check_revision(state,payload)
+        if 'report_options' in payload:
+            from report_composer import export
+            destination=export(self,state,payload.get('export_directory'),payload['report_options'])
+            return dict(exported_folder=destination,dataset=state['dataset'],revision=state['revision'])
         directory=payload.get('export_directory')
         if directory is not None:
             if not isinstance(directory,str) or not directory.strip() or not Path(directory.strip()).expanduser().is_absolute():
@@ -556,7 +586,7 @@ def make_handler(editor):
                 end=source.index('</dialog>',start)+len('</dialog>')
                 page=(ROOT/'ui/details-window.html').read_text(encoding='utf-8').replace('<!--PORE_DETAILS_DIALOG-->',source[start:end])
                 return self.send(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            if path in ['/workspace.js','/workspace.css','/comparison.js','/pore-list.js','/pore-details.js','/region-queue.js','/details-window.js']:
+            if path in ['/workspace.js','/workspace.css','/comparison.js','/pore-list.js','/pore-details.js','/pore-columns.js','/region-queue.js','/details-window.js','/report-composer.js']:
                 return self.send(200,(ROOT/'ui'/path[1:]).read_bytes(),'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
             if path=="/api/datasets": return self.send(200,editor.datasets())
             if path=="/api/projects": return self.send(200,dict(projects=editor.workflow.list_projects()))
@@ -588,7 +618,7 @@ def make_handler(editor):
                 return self.send(403,dict(error="Origin rejected"))
             try:
                 length=int(self.headers.get("Content-Length","0"))
-                limit=45_000_000 if self.path=='/api/upload' else 1_000_000
+                limit=45_000_000 if self.path in ['/api/upload','/api/report-workspace','/api/report-save-draft','/api/report-preview','/api/generate-report'] else 1_000_000
                 if not 0<length<limit: raise ValueError("Input is too large.")
                 payload=json.loads(self.rfile.read(length))
                 if self.path=='/api/choose-export-folder':
@@ -599,6 +629,9 @@ def make_handler(editor):
                     selected=subprocess.run([sys.executable,'-c',picker],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                     if selected.returncode:raise ValueError('Cannot open the folder picker. Enter the path manually.')
                     return self.send(200,dict(directory=selected.stdout.strip()))
+                if self.path=='/api/report-workspace':
+                    from report_workspace import handle
+                    with editor.lock: return self.send(200,handle(editor,payload))
                 if self.path=='/api/upload':
                     result=editor.receive_image(payload.get('name',''),base64.b64decode(payload.get('content',''),validate=True))
                     return self.send(200,result)
@@ -640,6 +673,9 @@ def make_handler(editor):
                 with editor.lock:
                     state=editor.state(payload.get("dataset"))
                     if self.path=="/api/load": result=editor.response(state)
+                    elif self.path=='/api/measurements':
+                        editor.check_revision(state,payload)
+                        result=editor.measurements(state)
                     elif self.path in ['/api/automate-add','/api/commit-automate']:
                         from automate_pores import add_candidate,consolidation_boxes
                         from operation_cancel import OperationCancelled, check_stop, publish_operation
@@ -673,6 +709,20 @@ def make_handler(editor):
                         editor.check_revision(state,payload)
                         from automate_pores import propose_boxes
                         result=propose_boxes(state)
+                    elif self.path=='/api/report-conditions-default':
+                        from report_composer import save_conditions_default
+                        save_conditions_default(editor,state,payload.get('conditions'))
+                        result=dict(saved=True)
+                    elif self.path in ['/api/report-content','/api/report-save-draft','/api/report-preview']:
+                        if self.path!='/api/report-save-draft': editor.check_revision(state,payload)
+                        from report_composer import load,content,save,validate,render_html
+                        if self.path=='/api/report-content': result=load(editor,state)
+                        elif self.path=='/api/report-save-draft':
+                            save(editor,state,payload.get('options'))
+                            result=dict(saved=True)
+                        else:
+                            data=content(editor,state)
+                            result=dict(html=render_html(data,validate(payload.get('options'),data)))
                     elif self.path=='/api/generate-report': result=editor.generate_report(state,payload)
                     elif self.path=='/api/export-images':
                         editor.check_revision(state,payload)
@@ -704,6 +754,7 @@ def make_handler(editor):
                         keep=payload.get('keep_tokens',[])
                         if not isinstance(keep,list) or any(not isinstance(t,str) for t in keep):raise ValueError('Invalid preview tokens.')
                         state['queued_previews']={k:v for k,v in state.get('queued_previews',{}).items() if k in keep}
+                        state['preview']=None
                         result=dict(cleared=True)
                     elif self.path in ["/api/apply","/api/delete","/api/undo","/api/resolve-overlaps","/api/cut","/api/merge"]:
                         result=editor.mutate(state,payload,self.path.rsplit("/",1)[1])

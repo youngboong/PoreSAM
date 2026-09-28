@@ -28,3 +28,9 @@ Thumbs.db
 # Desktop build artifacts (never include local analyses in installers)
 /build/
 /dist/
+
+# Fine-tuning data, cached features and trained weights
+/fine_tuning/data/
+/fine_tuning/datasets/
+/fine_tuning/runs/
+/fine_tuning/models/

@@ -20,11 +20,11 @@ import torch
 from analyze_candidates import export_folder
 from result_paths import read_artifact, write_artifact
 from pore_preprocessing import preprocessing_config, prepare_image, adjustable_config
-from segment_first_pass import (detect_footer, detect_scale_bar, candidates_from_masks,
-                                ProgressGenerator, overlay)
+from segment_first_pass import detect_footer, detect_scale_bar, overlay
 from sam2.build_sam import build_sam2
 from sam_runtime import inference_context, release_device_cache
 from operation_cancel import OperationCancelled
+from pore_selection import TraceGenerator, select
 from analysis_timing import AnalysisTiming
 
 
@@ -240,6 +240,8 @@ class ProjectWorkflow:
                 self.editor.predictor = None
                 self.editor.encoded_dataset = None
                 device = self.editor.device
+                model_checkpoint = checkpoint_path().resolve()
+                model_digest = self.file_digest(model_checkpoint)
                 release_device_cache(device)
                 source = (self.root/project['id']/'input/normalized.png').resolve()
                 gray = np.asarray(Image.open(source))[:config['analysis_bottom']]
@@ -248,8 +250,8 @@ class ProjectWorkflow:
                 sam_input=folder/'images/analysis_input.png'
                 sam_input.parent.mkdir(exist_ok=True)
                 Image.fromarray(sam_gray).save(sam_input)
-                settings = dict(points_per_side=config['points_per_side'],points_per_batch=8,pred_iou_thresh=.8,
-                                stability_score_thresh=.92,crop_n_layers=0,min_mask_region_area=0)
+                settings = dict(points_per_side=config['points_per_side'],points_per_batch=8,pred_iou_thresh=.7,
+                                stability_score_thresh=.85,crop_n_layers=0,min_mask_region_area=0,output_mode='uncompressed_rle')
                 possible = [self.root/project['id']/'runs'/r['id'] for r in reversed(project['runs'])]
                 if project.get('seed'): possible.append(Path(project['seed']))
                 cached = None
@@ -257,7 +259,10 @@ class ProjectWorkflow:
                     if not (candidate/'report.json').is_file(): continue
                     report = json.loads((candidate/'report.json').read_text(encoding='utf-8'))
                     if (report['analysis_bottom_exclusive']==config['analysis_bottom'] and report['settings']==settings
-                            and report.get('preprocessing_config',dict(mode='none'))==preprocessing):
+                            and report.get('preprocessing_config',dict(mode='none'))==preprocessing
+                            and report.get('checkpoint_sha256')==model_digest
+                            and report.get('inference_device')==device
+                            and (candidate/'sam_raw/pool.json').is_file()):
                         cached = candidate
                         break
                 if cached:
@@ -265,33 +270,39 @@ class ProjectWorkflow:
                     metadata = json.loads(read_artifact(cached,'raw_metadata.json').read_text())
                     with np.load(read_artifact(cached,'raw_masks.npz'),allow_pickle=False) as data:
                         raw = [dict(item,segmentation=data[f'mask_{i}'].copy()) for i,item in enumerate(metadata)]
+                    pool = json.loads((cached/'sam_raw/pool.json').read_text(encoding='utf-8'))
                 else:
                     self.progress(job_id,5,f'Loading SAM ({device.upper()})')
                     model = generator = None
                     try:
                         with inference_context(device):
-                            model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(checkpoint_path()),device=device,apply_postprocessing=False)
+                            model = build_sam2('configs/sam2.1/sam2.1_hiera_s.yaml',str(model_checkpoint),device=device,apply_postprocessing=False)
                             self.check_cancel(job_id)
-                            generator = ProgressGenerator(model,**settings)
+                            generator = TraceGenerator(model,**settings)
                             generator.cancel_callback = lambda:self.check_cancel(job_id)
                             generator.batch_started_callback = self.job_timings[job_id].start_detection
                             generator.progress_callback = lambda n:self.batch_progress(job_id,n,math.ceil(settings['points_per_side']**2/8))
-                            raw = generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
+                            generator.generate(cv2.cvtColor(sam_gray,cv2.COLOR_GRAY2RGB))
+                            pool = generator.pool
                     finally:
                         del generator,model
                         release_device_cache(device)
+                    from pore_selection import decode_candidates
+                    raw = decode_candidates(pool,.7,.85,device=device,score_dtype=torch.bfloat16 if device=='cuda' else torch.float32)
                     metadata = [{k:v for k,v in item.items() if k!='segmentation'} for item in raw]
                 self.progress(job_id,82,'Filtering pores…')
-                selected = candidates_from_masks(raw,sam_gray,config['min_contrast'],config['min_area_pixels'])
+                selected = select(pool,sam_gray,config['min_area_pixels'],config['min_contrast'],device,'two_stage_nested')
                 self.check_cancel(job_id)
                 write_artifact(folder,'raw_metadata.json').write_text(json.dumps(metadata,indent=2),encoding='utf-8')
+                (folder/'sam_raw/pool.json').write_text(json.dumps(pool),encoding='utf-8')
                 np.savez_compressed(write_artifact(folder,'raw_masks.npz'),**{f'mask_{i}':item['segmentation'] for i,item in enumerate(raw)})
-                masks = {i+1:item['mask'] for i,item in enumerate(selected)}
+                masks = {i+1:mask for i,mask in enumerate(selected['masks'])}
                 np.savez_compressed(write_artifact(folder,'entrance_candidates.npz'),**{f'candidate_{i}':m for i,m in masks.items()})
-                selection = dict(min_contrast=config['min_contrast'],min_area_pixels=config['min_area_pixels'])
+                selection = dict(method='two_stage_nested',min_contrast=config['min_contrast'],min_area_pixels=config['min_area_pixels'])
                 report = dict(image=str(source),source_name=project['name'],analysis_bottom_exclusive=config['analysis_bottom'],
                               scale=dict(label_um=config['scale_um'],length_pixels=config['scale_pixels'],um_per_pixel=config['scale_um']/config['scale_pixels'],label_source='user confirmed in Pore Editor'),
                               model='SAM 2.1 Small',settings=settings,selection_settings=selection,report_deferred=True,
+                              checkpoint=str(model_checkpoint),checkpoint_sha256=model_digest,
                               inference_device=report.get('inference_device','unknown') if cached else device,
                               raw_mask_count=len(raw),entrance_candidate_count=len(masks),
                               raw_masks_reused_from=str(cached) if cached else None,
@@ -299,8 +310,9 @@ class ProjectWorkflow:
                               sam_input_image=str(sam_input.resolve()),
                               overlay_relative_path='images/entrance_candidates_overlay.png',
                               status='unreviewed automatic candidates',normalization=project['normalization'],
-                              selection=f"largest component >=90%; area {config['min_area_pixels']}px..20%; ring contrast >={config['min_contrast']}; fill enclosed holes; suppress >80% containment",
-                              candidates=[{k:v for k,v in item.items() if k!='mask'} for item in selected])
+                              selection='two_stage_nested',two_stage_settings=selected['settings'],
+                              nested_settings=selected['nested_settings'],nested_decisions=selected['nested_decisions'],
+                              candidates=[dict(candidate_id=i,area=int(mask.sum())) for i,mask in masks.items()])
                 (folder/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
                 self.progress(job_id,90,'Saving masks…')
                 overlay(gray,[a['segmentation'] for a in raw]).save(write_artifact(folder,'raw_sam_overlay.png'))

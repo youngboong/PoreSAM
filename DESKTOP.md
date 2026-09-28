@@ -16,6 +16,8 @@ python -m pip check
 
 Download the SAM 2.1 Small checkpoint from the [official SAM 2 repository](https://github.com/facebookresearch/sam2) and place it at `checkpoints/sam2.1_hiera_small.pt`. The checkpoint is not stored in this repository.
 
+When `checkpoints/default_model.json` is present, the app and build use the verified checkpoint named there. The current deployment selects the full corrected 16-image native-resolution refit with Two-stage nested selection. The original checkpoint remains the training baseline; `--checkpoint` overrides the application default.
+
 ```powershell
 python scripts/pore_app.py
 ```
@@ -53,3 +55,9 @@ To create an installer, compile `packaging/PoreSAM.iss` using Inno Setup 6 after
 ## Verification
 
 See [tests/README.md](tests/README.md). Browser integration tests use an optional Playwright installation; it is not a runtime dependency.
+
+## Current app snapshot (2026-09-28)
+
+The installed app uses `sam2.1_hiera_small_native16_20260923.pt` (SHA-256 `fe8012962b401003ebcb3092708b04dc8d8d298a5865fec2fdde789301dcb25c`), trained for 300 updates on all 16 corrected images with native-resolution BCE + Dice. This full-data refit has no independent test score. Model weights, local analyses, and built executables are excluded from Git. To reproduce this model selection when building, provide that checkpoint and `checkpoints/default_model.json` with `checkpoint` set to its filename; a clean clone otherwise falls back to the original SAM checkpoint.
+
+Reports support multiple analyzed images, editable text, draggable figure contents, automatic draft saving, and PDF + HWPX export. Pore Details fills the resized window, renders plots at display resolution, and uses readable axes. Histogram bins have integer boundaries, shared with Export Plot; Max bins is an upper limit because integer boundaries can produce fewer bins.

@@ -92,7 +92,7 @@ def main():
             def generate(self,*args):
                 model_entered.set();assert model_release.wait(15)
                 self.cancel_callback();return []
-        with patch('project_workflow.build_sam2',return_value=object()),patch('project_workflow.ProgressGenerator',Generator):
+        with patch('project_workflow.build_sam2',return_value=object()),patch('project_workflow.TraceGenerator',Generator):
             page.evaluate('async(id)=>{await showProject(await api("project",{project_id:id}));showPanel("setup");}',project['id'])
             page.locator('#scaleUm').fill('10');page.locator('#scalePixels').fill('100');page.locator('#scaleConfirmed').check()
             page.locator('#runAnalysis').click();assert model_entered.wait(10)

@@ -14,6 +14,10 @@
       row.classList.toggle('selected',active);row.setAttribute('aria-selected',String(active));
     });
     $('selectedPoreCount').textContent=selected.size+' selected';
+    const boundary=(state?.candidates??[]).filter(row=>row.touches_image_edge).map(row=>row.candidate_id);
+    const boundarySelected=boundary.length>0&&boundary.length===selected.size&&boundary.every(id=>selected.has(id));
+    $('selectBoundaryPores').classList.toggle('active',boundarySelected);
+    $('selectBoundaryPores').setAttribute('aria-pressed',String(boundarySelected));
   }
   async function renderSelection(centerId=null){
     const version=++generation;mask=null;tintedColor=null;selectionRows();draw();controls();
@@ -60,7 +64,7 @@
     pickEpoch++;generation++;mask=null;
     const existing=new Set(data.candidates.map(c=>c.candidate_id));
     selected=currentDataset!==data.dataset?new Set():new Set([...selected].filter(id=>existing.has(id)));
-    currentDataset=data.dataset;window.renderPoreDetails?.(data);renderSelection();
+    currentDataset=data.dataset;renderSelection();
   };
   window.selectPoreFromDetails=(id,toggle=false)=>{
     if(!busy&&state?.candidates.some(c=>c.candidate_id===id)){pickEpoch++;selectPore(id,toggle)}
@@ -88,6 +92,7 @@
     if(busy||!state)return;
     if(mode!=='select')document.querySelector('[data-mode="select"]').click();
     pickEpoch++;selected=new Set(state.candidates.filter(c=>c.touches_image_edge).map(c=>c.candidate_id));
-    renderSelection();setStatus('Boundary pores: '+selected.size+' selected');
+    if(selected.size)$('fitComparison').click();
+    renderSelection();setStatus(selected.size?'Boundary pores: '+selected.size+' selected':'No pores touch the analysis image boundary.');
   };
 })();

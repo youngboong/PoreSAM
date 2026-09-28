@@ -34,9 +34,10 @@ class DesktopDetails:
 
     def details_state(self,known_key=None):
         return self._main.evaluate_js('''(()=>{
-          const data=typeof state==='undefined'?null:state;
+          const data=window.detailsSnapshot??null;
+          const stale=!!data&&(typeof state==='undefined'||!state||state.dataset!==data.dataset||state.revision!==data.revision);
           const key=data?data.dataset+':'+data.revision:null;
-          return {key,busy:typeof busy!=='undefined'&&busy,
+          return {key,stale,busy:stale||(typeof busy!=='undefined'&&busy),
             selected:window.getSelectedPores?.()??[],color:window.selectionColor?.()??'#ff00ff',
             data:key!==KNOWN&&data?{dataset:data.dataset,revision:data.revision,candidates:data.candidates,stats:data.stats}:null};
         })()'''.replace('KNOWN',json.dumps(known_key)))
