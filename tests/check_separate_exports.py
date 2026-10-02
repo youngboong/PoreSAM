@@ -50,30 +50,28 @@ def main():
             page.locator('#openAnalysisTab').click();page.locator('#imageLibrary .image-card').first.click();page.wait_for_function('state && !busy')
             directory=run/'exported'
             page.route('**/api/choose-export-folder',lambda route:route.fulfill(json={'directory':str(directory)}))
-            page.locator('#saveEditorImages').click();page.wait_for_function('!busy && document.getElementById("status").textContent.startsWith("3 images saved:")')
-            exported=next(directory.glob('*_images_*'))
-            assert {p.name for p in exported.iterdir()}=={'comparison.png','segmentation.png','pores_colored.png'}
+            page.locator('#saveEditorImages').click();page.wait_for_function('!busy && document.getElementById("status").textContent.startsWith("4 images saved:")')
+            exported=directory
+            assert {p.name for p in exported.iterdir()}=={'shapes_comparison.png','shapes_segmentation.png','shapes_pores_colored.png','shapes_original.png'}
             org=np.array(Image.open(editor.workflow.root/project['id']/'input/normalized.png').convert('RGB'))
-            for name in ['segmentation.png','pores_colored.png']:
+            for name in ['shapes_segmentation.png','shapes_pores_colored.png']:
                 pixels=np.array(Image.open(exported/name));assert pixels.shape==org.shape
                 assert np.array_equal(pixels[400:],org[400:])
                 assert not np.array_equal(pixels[:400],org[:400])
-            comparison=np.array(Image.open(exported/'comparison.png'))
+            comparison=np.array(Image.open(exported/'shapes_comparison.png'))
             assert comparison.shape==(440,800,3) and np.array_equal(comparison[:,:400],org)
-            assert np.array_equal(comparison[:,400:],np.array(Image.open(exported/'segmentation.png')))
-            assert not np.array_equal(np.array(Image.open(exported/'segmentation.png')),np.array(Image.open(exported/'pores_colored.png')))
+            assert np.array_equal(comparison[:,400:],np.array(Image.open(exported/'shapes_segmentation.png')))
+            assert not np.array_equal(np.array(Image.open(exported/'shapes_segmentation.png')),np.array(Image.open(exported/'shapes_pores_colored.png')))
             assert page.evaluate('state.revision')==0
             page.locator('[data-panel=analysis]').click()
             page.locator('#chooseExportDirectory').click();page.wait_for_function('!busy')
             page.locator('#generateReport').click();page.wait_for_function('!busy && document.getElementById("exportResult").textContent.startsWith("Exported to:")')
-            reports=next(directory.glob('*_report_*'))
-            assert {p.name for p in reports.iterdir()}=={'report.pdf','report.html'}
-            html=(reports/'report.html').read_text(encoding='utf-8')
-            assert html.count('src="data:image/png;base64,')==2
-            assert 'href="candidates.csv"' not in html and 'href="report.pdf"' in html
+            reports=directory
+            assert len(list(reports.glob('*.pdf')))==1 and len(list(reports.glob('*.hwpx')))==1
+            assert not list(reports.glob('*.html'))
             assert page.evaluate('state.revision')==0
             assert not errors,errors
-            print('PASS: Save Images + native picker wiring, exactly three images, original footer, unchanged masks, report-only PDF/standalone HTML')
+            print('PASS: Save Images + native picker wiring, exactly four images, original footer, unchanged masks, PDF/HWPX')
             print(exported);print(reports)
             browser.close()
     finally:server.shutdown()

@@ -4,7 +4,7 @@ import numpy as np
 from scipy import ndimage as ndi
 
 DEFAULTS=dict(min_score=.7,min_stability=.85,min_contrast=5.,min_rim_support=.60,
-              max_overlap_fraction=.20,min_new_component_fraction=.90,rim_distance=3.,max_area_fraction=.20)
+              containment_threshold=.95,max_overlap_fraction=.20,min_new_component_fraction=.90,rim_distance=3.,max_area_fraction=.20)
 
 
 def rim_evidence(mask,gray,distance=3.):
@@ -27,11 +27,11 @@ def rim_evidence(mask,gray,distance=3.):
 
 
 def supplement(strict_masks,raw_candidates,gray,min_area=100,min_contrast=2,settings=None):
-    """Keep strict masks fixed; only add mostly-uncovered, rim-supported regions.
+    """Replace contained masks only with quality- and rim-supported parents.
 
-    No reference mask or evaluation metric is accepted by this function.
-    Candidates with substantial overlap are deliberately deferred; this pass does
-    not implement automatic box proposals, replacements, or merging.
+    Partial overlaps remain subject to the conservative overlap and trimming
+    checks. The subsequent nested pass can restore independently supported
+    children separated by a broad bright surface.
     """
     config={**DEFAULTS,**(settings or {})}
     required_contrast=max(float(min_contrast),config['min_contrast'])
@@ -40,7 +40,25 @@ def supplement(strict_masks,raw_candidates,gray,min_area=100,min_contrast=2,sett
     for mask in masks:
         if np.any(mask&occupied):raise ValueError('Strict masks must be disjoint.')
         occupied|=mask
-    original=occupied.copy();log=[];eligible=[]
+    original=occupied.copy();log=[];eligible=[];replaced_count=0
+    def mask_info(mask):
+        yy,xx=np.where(mask)
+        return (len(yy),int(yy.min()),int(yy.max())+1,int(xx.min()),int(xx.max())+1) if len(yy) else (0,0,0,0,0)
+    mask_infos=[mask_info(m) for m in masks]
+    def replacement_context(candidate):
+        area,y0,y1,x0,x1=mask_info(candidate)
+        replaced=[]
+        for i,(old_area,oy0,oy1,ox0,ox1) in enumerate(mask_infos):
+            if not 0<old_area<area:continue
+            sy0,sy1=max(y0,oy0),min(y1,oy1)
+            sx0,sx1=max(x0,ox0),min(x1,ox1)
+            if sy0>=sy1 or sx0>=sx1:continue
+            region=np.s_[sy0:sy1,sx0:sx1]
+            if np.count_nonzero(candidate[region]&masks[i][region])>=config['containment_threshold']*old_area:
+                replaced.append(i)
+        remaining=occupied.copy()
+        for i in replaced:remaining[masks[i]]=False
+        return replaced,remaining
     smooth=cv2.GaussianBlur(gray.astype(np.float32),(0,0),1.)
     for index,item in enumerate(raw_candidates):
         entry=dict(candidate=index,pool_id=item.get('pool_id',index),score=float(item['predicted_iou']),
@@ -60,7 +78,9 @@ def supplement(strict_masks,raw_candidates,gray,min_area=100,min_contrast=2,sett
         contrast=float(gray[ring].mean()-gray[mask].mean()) if ring.any() else 0.
         entry['contrast']=contrast
         if contrast<required_contrast:entry['reason']='contrast';continue
-        overlap=float(np.count_nonzero(mask&occupied)/area);entry['initial_overlap']=overlap
+        contained,remaining=replacement_context(mask)
+        overlap=float(np.count_nonzero(mask&remaining)/area);entry['initial_overlap']=overlap
+        entry['initial_contained_count']=len(contained)
         if overlap>config['max_overlap_fraction']:entry['reason']='existing_overlap';continue
         evidence=rim_evidence(mask,smooth,config['rim_distance'])
         support=float(np.mean(evidence>=required_contrast)) if evidence.size else 0.
@@ -69,15 +89,25 @@ def supplement(strict_masks,raw_candidates,gray,min_area=100,min_contrast=2,sett
         rank=.5*entry['score']+.3*entry['stability']+.2*support
         eligible.append((rank,index,mask))
     for _,index,mask in sorted(eligible,key=lambda c:(-c[0],c[1])):
-        entry=log[index];overlap=float(np.count_nonzero(mask&occupied)/mask.sum())
+        entry=log[index];contained,remaining=replacement_context(mask)
+        overlap=float(np.count_nonzero(mask&remaining)/mask.sum())
         if overlap>config['max_overlap_fraction']:entry['reason']='selected_overlap';continue
-        novel=mask&~occupied;components,n=ndi.label(novel)
+        novel=mask&~remaining;components,n=ndi.label(novel)
         if not n:entry['reason']='no_new_area';continue
         sizes=np.bincount(components.ravel());sizes[0]=0;new=components==sizes.argmax()
         if new.sum()<min_area or new.sum()<config['min_new_component_fraction']*novel.sum():
             entry['reason']='fragmented_after_trim';continue
-        masks.append(new);occupied|=new
-        entry.update(accepted=True,reason='added',added_pixels=int(new.sum()))
-    assert not np.any(original&~occupied)
+        # Clipping against unrelated neighbours must not erase a replacement target.
+        if any(np.count_nonzero(new&masks[i])<config['containment_threshold']*int(masks[i].sum()) for i in contained):
+            entry['reason']='containment_lost_after_trim';continue
+        entry['replaced_mask_indices']=contained
+        entry['replaced_areas']=[int(masks[i].sum()) for i in contained]
+        added_pixels=int(np.count_nonzero(new&~occupied))
+        masks=[old for i,old in enumerate(masks) if i not in contained]
+        mask_infos=[info for i,info in enumerate(mask_infos) if i not in contained]
+        mask_infos.append(mask_info(new))
+        masks.append(new);occupied=remaining|new;replaced_count+=len(contained)
+        entry.update(accepted=True,reason='replaced_contained' if contained else 'added',added_pixels=added_pixels)
+    assert sum(int(m.sum()) for m in masks)==int(occupied.sum())
     return masks,log,dict(**config,required_contrast=required_contrast,
-                          added_masks=len(masks)-len(strict_masks),added_pixels=int(np.count_nonzero(occupied&~original)))
+                          added_masks=len(masks)-len(strict_masks),replaced_masks=replaced_count,removed_pixels=int(np.count_nonzero(original&~occupied)),added_pixels=int(np.count_nonzero(occupied&~original)))

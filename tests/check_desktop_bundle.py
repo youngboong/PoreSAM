@@ -91,7 +91,7 @@ def main():
         assert preview['choices']
         images=post('export-images',dict(dataset=dataset,revision=state['revision'],directory=str(run/'exported'),labels=False))
         report=post('generate-report',dict(dataset=dataset,revision=state['revision'],export_directory=str(run/'exported')))
-        assert len(list(Path(images['exported_folder']).glob('*.png')))==3
+        assert len(list(Path(images['exported_folder']).glob('*.png')))==4
         assert {p.name for p in Path(report['exported_folder']).iterdir()}=={'report.pdf','report.html'}
         assert (Path(report['exported_folder'])/'report.pdf').read_bytes().startswith(b'%PDF-')
         result=dict(device='cpu',stop_checked=args.check_stop,automatic_candidates=len(state['candidates']),prompted_choices=len(preview['choices']),images=images['exported_folder'],report=report['exported_folder'],elapsed_seconds=time.monotonic()-started)

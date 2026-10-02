@@ -52,11 +52,32 @@ def export_images(editor,state,payload):
                 y,x=np.unravel_index(cv2.distanceTransform(mask.astype(np.uint8),cv2.DIST_L2,3).argmax(),mask.shape)
                 cv2.putText(roi,str(candidate_id),(int(x)-6,int(y)+4),cv2.FONT_HERSHEY_SIMPLEX,.4,(0,0,0),3)
                 cv2.putText(roi,str(candidate_id),(int(x)-6,int(y)+4),cv2.FONT_HERSHEY_SIMPLEX,.4,(255,255,255),1)
-    staging,destination=export_paths(editor,state,payload.get('directory'),'images')
-    Image.fromarray(np.concatenate([original,mono],axis=1)).save(staging/'comparison.png')
-    Image.fromarray(mono).save(staging/'segmentation.png')
-    Image.fromarray(multi).save(staging/'pores_colored.png')
-    staging.rename(destination)
+    directory=payload.get('directory')
+    if not isinstance(directory,str) or not directory.strip():raise ValueError('Choose a destination folder.')
+    destination=Path(directory.strip()).expanduser()
+    if not destination.is_absolute():raise ValueError('Enter the full destination folder path.')
+    destination=destination.resolve();destination.mkdir(parents=True,exist_ok=True)
+    raw_source=source
+    _,original_name=source_image(editor,state)
+    for project in editor.workflow.projects.values():
+        if any(run['dataset']==state['dataset'] for run in project['runs']):
+            raw_source=editor.workflow.root/project['id']/project['original_file'];break
+    label=re.sub(r'[^\w.-]+','_',Path(original_name).stem).strip('._')[:60] or 'image'
+    suffix=raw_source.suffix.lower() or '.png'
+    counter=1
+    while True:
+        stem=label if counter==1 else f'{label}_{counter}'
+        names=[stem+'_comparison.png',stem+'_segmentation.png',stem+'_pores_colored.png',stem+'_original'+suffix]
+        if not any((destination/name).exists() for name in names):break
+        counter+=1
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='.poresam-',dir=destination) as temp:
+        staging=Path(temp)
+        Image.fromarray(np.concatenate([original,mono],axis=1)).save(staging/names[0])
+        Image.fromarray(mono).save(staging/names[1])
+        Image.fromarray(multi).save(staging/names[2])
+        shutil.copyfile(raw_source,staging/names[3])
+        for name in names:(staging/name).rename(destination/name)
     return str(destination)
 
 

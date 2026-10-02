@@ -22,6 +22,7 @@ function beginStopOperation(buttonId,label,notice){
 const setupCanvas=$('setupCanvas'),setupContext=setupCanvas.getContext('2d');
 function showPanel(name){
   if(!['load','setup','editor','analysis'].includes(name))return;
+  if(name==='analysis'&&!window.canOpenReportComposer?.())return;
   if(name==='editor'&&!state)return;
   if(name==='setup'&&!setupProject)return;
   for(const panel of ['load','setup','editor','analysis'])$(panel+'Panel').classList.toggle('hidden',panel!==name);
@@ -68,7 +69,7 @@ $('retryLibrary').onclick=()=>workspaceWork('Loading images…',async()=>{await 
 function updateHistory(selected){
   const entry=imageLibrary.find(e=>e.analyses.some(a=>a.dataset===selected));
   $('dataset').replaceChildren();
-  if(entry)entry.analyses.forEach(a=>$('dataset').add(new Option(entry.name+' · '+a.label+(a.revision?' · Revision '+a.revision:''),a.dataset)));
+  if(entry)$('dataset').add(new Option(entry.name,selected));
   else if(selected)$('dataset').add(new Option(datasetLabels[selected]??selected,selected));
   $('dataset').value=selected;
 }
@@ -78,9 +79,8 @@ function renderImageLibrary(){
     const card=document.createElement('button');card.className='image-card';card.dataset.imageId=entry.id;card.dataset.analyzed=String(entry.analyzed);
     const thumbnail=document.createElement('img');thumbnail.src=entry.preview_url;thumbnail.alt='';thumbnail.loading='lazy';
     const name=document.createElement('strong');name.textContent=entry.name;
-    const detail=document.createElement('span');detail.className='hint';detail.textContent='Saved analysis';
     const action=document.createElement('span');action.className='image-action';action.textContent=entry.analyzed?'Open Analysis →':'Preprocess →';
-    card.append(thumbnail,name,detail,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
+    card.append(thumbnail,name,action);card.onclick=()=>workspaceWork('Loading image…',async()=>selectImage(await api('open-image',{image_id:entry.id})));
     $('imageLibrary').append(card);
   }
   if(!$('imageLibrary').children.length){const message=document.createElement('p');message.className='hint';message.textContent='No saved analyses.';$('imageLibrary').append(message)}
@@ -298,5 +298,5 @@ $('saveEditorImages').onclick=()=>work('Choose an image destination folder.',asy
   if(!picked.directory){setStatus('Image export canceled.');return;}
   setStatus('Saving images...');
   const result=await api('export-images',{...payload(),directory:picked.directory,color:$('poreColor').value,opacity:Number($('poreOpacity').value),labels:$('showPoreLabels').checked});
-  setStatus('3 images saved: '+result.exported_folder);
+  setStatus('4 images saved: '+result.exported_folder);
 });

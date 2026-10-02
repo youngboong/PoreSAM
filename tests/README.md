@@ -34,3 +34,7 @@ The first runs CPU SAM and export checks in the packaged app. The details check 
 Report composer checks: `python tests/check_report_composer.py` exercises selection, captions, reordering, added images, editable text, persistence, HTML escaping, zero pores, PDF pagination and Korean output. PDF rendering uses a test-only PyMuPDF installation under outputs/report_test_deps. `python tests/check_report_bundle.py` opens the packaged WebView with isolated synthetic data, checks actual button clicks, preserves edited text after a pore deletion, exports PDF/HWPX, and closes only its test process.
 
 The current Details checks also cover resizing, high-DPI plots, readable scatter axes, integer histogram boundaries, and matching screen/export bin counts. `python tests/check_multi_report.py` checks multi-image report persistence and export.
+
+`python tests/check_folder_reports.py` checks direct four-file exports, byte-identical original TIFF preservation, filename collisions, multi-folder figures, source-file independence, persistence, and PDF/HWPX export. The native report check covers the same folder workflow in the packaged app.
+
+`python -m unittest discover -s tests -p test_report_layout.py` checks seamless composition with different aspect ratios, histogram sizing, and HWPX spacing.

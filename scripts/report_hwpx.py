@@ -26,7 +26,7 @@ def xml(node):return ET.tostring(node,encoding='utf-8',xml_declaration=True)
 
 def export_hwpx(path,data,options):
     from pore_editor import ROOT
-    from report_composer import selected
+    from report_composer import selected,figure_scale,table_widths,table_header,table_numeric
     with zipfile.ZipFile(ROOT/'ui/report-hwpx-template.zip') as source:
         files={n:source.read(n) for n in source.namelist()}
     templates=ET.fromstring(files.pop('templates.xml'))
@@ -34,7 +34,7 @@ def export_hwpx(path,data,options):
     charlist=head.find('.//hh:charProperties',NS)
     paralist=head.find('.//hh:paraProperties',NS)
     chars={};paras={}
-    for key,height,bold in [('body',1100,False),('title',1700,True),('heading',1300,True),('table',950,False),('caption',1000,False)]:
+    for key,height,bold in [('body',1100,False),('title',1700,True),('heading',1300,True),('table',950,False),('table_head',950,True),('caption',1000,False)]:
         style=copy.deepcopy(charlist[0]);identifier=max(int(e.get('id')) for e in charlist)+1
         style.set('id',str(identifier));style.set('height',str(height))
         font=style.find('hh:fontRef',NS)
@@ -42,19 +42,33 @@ def export_hwpx(path,data,options):
         if bold:ET.SubElement(style,tag('hh','bold'))
         charlist.append(style);chars[key]=str(identifier)
     charlist.set('itemCnt',str(len(charlist)))
-    for key in ['body','heading','caption']:
+    for key in ['body','heading','caption','gap','table_left','table_right','table_center']:
         style=copy.deepcopy(paralist[0]);identifier=max(int(e.get('id')) for e in paralist)+1
         style.set('id',str(identifier));style.find('hh:align',NS).set('horizontal','CENTER' if key=='caption' else 'LEFT')
         style.find('hh:breakSetting',NS).set('keepWithNext','1' if key=='heading' else '0')
+        if key.startswith('table_'):
+            style.find('hh:align',NS).set('horizontal',key.split('_')[1].upper())
+            for spacing in style.findall('.//hh:lineSpacing',NS):spacing.attrib.update(type='PERCENT',value='135')
+        if key=='gap':
+            for spacing in style.findall('.//hh:lineSpacing',NS):spacing.attrib.update(type='FIXED',value='2160')
         paralist.append(style);paras[key]=str(identifier)
     paralist.set('itemCnt',str(len(paralist)))
+    borders=head.find('.//hh:borderFills',NS);border_ids={}
+    for top,bottom in [(False,False),(True,False),(False,True),(True,True)]:
+        border=copy.deepcopy(borders[0]);identifier=max(int(e.get('id')) for e in borders)+1
+        border.set('id',str(identifier))
+        for side in ['left','right','top','bottom']:
+            visible=(side=='top' and top) or (side=='bottom' and bottom)
+            border.find('hh:'+side+'Border',NS).attrib.update(type='SOLID' if visible else 'NONE',width='0.3 mm' if side=='top' else '0.2 mm',color='#222222')
+        borders.append(border);border_ids[top,bottom]=str(identifier)
+    borders.set('itemCnt',str(len(borders)))
     section=ET.Element(tag('hs','sec'));counter=100000;preview=[]
     def new_id():
         nonlocal counter
         counter+=1;return str(counter)
     def paragraph(text='',kind='body',parent=None):
-        p=ET.SubElement(section if parent is None else parent,tag('hp','p'),dict(id=new_id(),paraPrIDRef=paras['heading' if kind in ['heading','title'] else 'caption' if kind=='caption' else 'body'],styleIDRef='0',pageBreak='0',columnBreak='0',merged='0'))
-        run=ET.SubElement(p,tag('hp','run'),dict(charPrIDRef=chars[kind]))
+        p=ET.SubElement(section if parent is None else parent,tag('hp','p'),dict(id=new_id(),paraPrIDRef=paras['heading' if kind in ['heading','title'] else 'caption' if kind=='caption' else 'gap' if kind=='gap' else 'body'],styleIDRef='0',pageBreak='0',columnBreak='0',merged='0'))
+        run=ET.SubElement(p,tag('hp','run'),dict(charPrIDRef=chars['body' if kind=='gap' else kind]))
         ET.SubElement(run,tag('hp','t')).text=text
         return p,run
     def prose(text,kind='body'):
@@ -71,18 +85,24 @@ def export_hwpx(path,data,options):
     def table(headers,rows):
         allrows=([headers] if headers else [])+rows
         if not allrows:return
-        cols=len(allrows[0]);p,run=paragraph()
-        t=copy.deepcopy(templates.find('hp:tbl',NS));t.attrib.update(id=new_id(),rowCnt=str(len(allrows)),colCnt=str(cols),repeatHeader='1' if headers else '0')
-        t.find('hp:sz',NS).attrib.update(width=str(width),height=str(2000*len(allrows)))
+        cols=len(allrows[0]);p,run=paragraph();fractions=table_widths(cols,bool(headers))
+        widths=[round(width*f) for f in fractions];widths[-1]+=width-sum(widths)
+        heights=[max(str(v).count('\n')+1 for v in (list(map(table_header,row)) if headers and i==0 else row))*1350+1100 for i,row in enumerate(allrows)]
+        t=copy.deepcopy(templates.find('hp:tbl',NS));t.attrib.update(id=new_id(),rowCnt=str(len(allrows)),colCnt=str(cols),repeatHeader='1' if headers else '0',borderFillIDRef=border_ids[False,False])
+        t.find('hp:sz',NS).attrib.update(width=str(width),height=str(sum(heights)))
         t.find('hp:pos',NS).set('treatAsChar','1')
         for y,row in enumerate(allrows):
             tr=ET.SubElement(t,tag('hp','tr'))
             for x,value in enumerate(row):
-                cell=copy.deepcopy(templates.find('hp:tc',NS));cell.set('header','1' if headers and y==0 else '0');cell.set('borderFillIDRef','5')
+                cell=copy.deepcopy(templates.find('hp:tc',NS));cell.set('header','1' if headers and y==0 else '0');cell.set('borderFillIDRef',border_ids[y==0,(bool(headers) and y==0) or y==len(allrows)-1]);cell.set('hasMargin','1')
+                cell.find('hp:cellMargin',NS).attrib.update(left='600',right='600',top='550',bottom='550')
                 cell.find('hp:cellAddr',NS).attrib.update(colAddr=str(x),rowAddr=str(y))
-                cell.find('hp:cellSz',NS).attrib.update(width=str(width//cols+(width%cols if x==cols-1 else 0)),height='2000')
+                cell.find('hp:cellSz',NS).attrib.update(width=str(widths[x]),height=str(heights[y]))
                 sub=cell.find('hp:subList',NS)
-                for line in str(value).split('\n'):paragraph(line,'table',sub)
+                is_header=bool(headers) and y==0
+                align='center' if is_header and x else 'right' if headers and x and table_numeric(value) else 'left'
+                for line in (table_header(value) if is_header else str(value)).split('\n'):
+                    cell_p,_=paragraph(line,'table_head' if is_header else 'table',sub);cell_p.set('paraPrIDRef',paras['table_'+align])
                 tr.append(cell)
             preview.append('\t'.join(map(str,row)))
         run.insert(0,t)
@@ -91,13 +111,14 @@ def export_hwpx(path,data,options):
     prose('나) 분석 방법','heading');prose(options['method'])
     prose('다) 분석 결과','heading');prose(options['results'])
     binaries=[];figure_number=table_number=0
-    for item,asset in selected(data,options):
+    for index,(item,asset) in enumerate(selected(data,options)):
+        if index:paragraph(kind='gap')
         if asset['kind']=='table':
             table_number+=1;prose(f'표 {table_number}. '+item['caption'],'caption');table(asset['headers'],asset['rows'])
             continue
         figure_number+=1;raw=base64.b64decode(asset['image'].split(',',1)[1]);im=Image.open(io.BytesIO(raw)).convert('RGB')
         stream=io.BytesIO();im.save(stream,format='PNG');key=f'image{figure_number}';binaries.append((key,stream.getvalue()))
-        scale=min(width/im.width,53000/im.height);w=max(1,round(im.width*scale));h=max(1,round(im.height*scale))
+        scale=min(width/im.width,53000/im.height)*figure_scale(asset);w=max(1,round(im.width*scale));h=max(1,round(im.height*scale))
         p,run=paragraph();p.set('paraPrIDRef',paras['caption'])
         pic=copy.deepcopy(templates.find('hp:pic',NS));pic.attrib.update(id=new_id(),instid=new_id(),zOrder=str(figure_number),numberingType='NONE')
         for name in ['orgSz','curSz','sz']:pic.find('hp:'+name,NS).attrib.update(width=str(w),height=str(h))

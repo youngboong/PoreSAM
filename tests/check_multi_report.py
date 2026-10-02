@@ -20,6 +20,13 @@ from report_composer import content,defaults,validate,render_html,render_pdf
 def open_more(page):
     if page.locator('#reportMore').get_attribute('open') is None:page.locator('#reportMore > summary').click()
 
+def open_report(page):
+    if page.locator('[data-panel=analysis]').is_disabled():
+        page.locator('#openAnalysisTab').click()
+        page.locator('#imageLibrary .image-card').first.click()
+        page.wait_for_function('state&&!busy')
+    page.locator('[data-panel=analysis]').click()
+
 def main():
     run=ROOT/'outputs/ui_checks'/('multi_report_'+time.strftime('%Y%m%d_%H%M%S'));run.mkdir(parents=True)
     editor=Editor(run/'edits',run/'projects',device='cpu')
@@ -43,8 +50,11 @@ def main():
         browser=p.chromium.launch(executable_path=r'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe',headless=True)
         page=browser.new_page(viewport=dict(width=1500,height=1000));page.on('pageerror',lambda e:errors.append(str(e)))
         page.goto(f'http://127.0.0.1:{server.server_port}');page.wait_for_function('!busy')
-        page.locator('[data-panel=analysis]').click();page.wait_for_function("!busy&&!document.getElementById('reportComposeBody').classList.contains('hidden')")
-        assert page.evaluate('state===null')
+        open_report(page);page.wait_for_function("!busy&&!document.getElementById('reportComposeBody').classList.contains('hidden')")
+        assert page.evaluate('state!==null')
+        page.locator('#reportMore > summary').click()
+        page.locator('#newReportWorkspace').click();page.wait_for_function('!busy')
+        page.evaluate('state=null;controls()')
         page.locator('#addReportAnalyses').click();page.wait_for_function('!busy')
         assert page.locator('#reportAnalysesChoices input').count()==2
         for check in page.locator('#reportAnalysesChoices input').all():check.check()
@@ -65,13 +75,15 @@ def main():
         open_more(page)
         page.locator('#saveReportDraft').click();page.wait_for_function('!busy')
         saved=json.loads((run/'edits/report_workspaces'/f'{identifier}.json').read_text(encoding='utf-8'))
-        assert len(saved['sources'])==2 and len(saved['assets'])==18
-        assert len({a['id'] for a in saved['assets']})==18
+        from report_composer import METRICS
+        expected_assets=2*(4+len(METRICS))
+        assert len(saved['sources'])==2 and len(saved['assets'])==expected_assets
+        assert len({a['id'] for a in saved['assets']})==expected_assets
         assert saved['options']['results']=='Manually edited combined results.'
         assert saved['options']['items'][0]['image_ids'][0].split('_comparison')[0]!=saved['options']['items'][0]['image_ids'][1].split('_original')[0]
         # Switching the active editor image must not replace the report.
         page.evaluate("async dataset=>{await accept(await api('load',{dataset}))}",dataset)
-        page.locator('[data-panel=analysis]').click();page.wait_for_function('!busy')
+        open_report(page);page.wait_for_function('!busy')
         assert page.locator('#reportWorkspaceSelect').input_value()==identifier
         assert page.locator('.report-card').count()==4
         # New report and reopening keep independent content.
@@ -87,9 +99,12 @@ def main():
         assert len(list((run/'export').iterdir()))==2
         from test_report_hwpx import verify_hwpx
         text,pictures,tables=verify_hwpx(next((run/'export').glob('*.hwpx')));assert pictures==2 and tables>=2 and 'Manually edited' in text
-        # New browser session restores report from server-side active report, not local storage.
+        # New sessions start from the current analysis; saved reports reopen explicitly.
         page.close();page=browser.new_page(viewport=dict(width=1500,height=1000));page.on('pageerror',lambda e:errors.append(str(e)))
-        page.goto(f'http://127.0.0.1:{server.server_port}');page.wait_for_function('!busy');page.locator('[data-panel=analysis]').click();page.wait_for_function("!busy&&!document.getElementById('reportComposeBody').classList.contains('hidden')")
+        page.goto(f'http://127.0.0.1:{server.server_port}');page.wait_for_function('!busy');open_report(page);page.wait_for_function("!busy&&!document.getElementById('reportComposeBody').classList.contains('hidden')")
+        assert page.locator('#reportWorkspaceSelect').input_value()==''
+        assert page.locator('#reportSourceChips .report-source-chip').count()==1
+        open_more(page);page.locator('#reportWorkspaceSelect').select_option(identifier);page.wait_for_function('!busy')
         assert page.locator('#reportWorkspaceSelect').input_value()==identifier
         assert page.locator('.report-card').count()==4
         assert not page.locator('#reportWorkspaceSelect').is_visible()

@@ -37,5 +37,65 @@ class SupplementTests(unittest.TestCase):
         self.assertEqual(len(masks),2)
         self.assertEqual(sum(r['accepted'] for r in log),1)
 
+    def parent_scene(self):
+        gray=np.full((120,160),180,np.uint8)
+        parent=np.zeros(gray.shape,bool);parent[25:65,40:80]=True
+        child=np.zeros(gray.shape,bool);child[35:45,50:60]=True
+        gray[parent]=30
+        return gray,parent,child,dict(segmentation=parent,predicted_iou=.75,stability_score=.9)
+
+    def test_contained_child_replaced_without_hole(self):
+        gray,parent,child,candidate=self.parent_scene()
+        masks,log,settings=supplement([child],[candidate],gray)
+        self.assertEqual(len(masks),1)
+        np.testing.assert_array_equal(masks[0],parent)
+        self.assertEqual(log[0]['reason'],'replaced_contained')
+        self.assertEqual(settings['replaced_masks'],1)
+
+    def test_large_overlap_is_allowed_only_for_containment(self):
+        gray,parent,child,candidate=self.parent_scene()
+        child=parent.copy();child[25:35]=False
+        masks,log,_=supplement([child],[candidate],gray)
+        np.testing.assert_array_equal(masks[0],parent)
+        partial=np.roll(parent,20,axis=1)
+        masks,log,_=supplement([partial],[candidate],gray)
+        np.testing.assert_array_equal(masks[0],partial)
+        self.assertEqual(log[0]['reason'],'existing_overlap')
+
+    def test_weak_parent_does_not_delete_child(self):
+        gray,parent,child,candidate=self.parent_scene()
+        gray[parent]=180;gray[child]=30
+        masks,log,_=supplement([child],[candidate],gray)
+        np.testing.assert_array_equal(masks[0],child)
+        self.assertFalse(log[0]['accepted'])
+
+    def test_child_selected_first_is_replaced_by_parent(self):
+        gray,parent,child,candidate=self.parent_scene()
+        small=dict(candidate,segmentation=child,predicted_iou=.9)
+        # Both candidates must have independent rim evidence to enter selection.
+        gray[child]=0
+        masks,log,_=supplement([],[small,candidate],gray)
+        self.assertEqual(len(masks),1)
+        np.testing.assert_array_equal(masks[0],parent)
+
+    def test_two_children_replaced_as_one_parent(self):
+        gray,parent,child,candidate=self.parent_scene()
+        second=np.roll(child,15,axis=0)
+        masks,log,_=supplement([child,second],[candidate],gray)
+        self.assertEqual(len(masks),1)
+        np.testing.assert_array_equal(masks[0],parent)
+        self.assertEqual(len(log[0]['replaced_mask_indices']),2)
+
+    def test_replacement_cannot_erase_child_after_partial_overlap_trim(self):
+        # A thin unrelated neighbour bisects the proposed parent.
+        gray,parent,child,candidate=self.parent_scene()
+        neighbour=np.zeros(gray.shape,bool);neighbour[20:70,59:61]=True
+        child=np.zeros(gray.shape,bool);child[35:45,65:75]=True
+        masks,log,_=supplement([child,neighbour],[candidate],gray,settings={'min_new_component_fraction':.4})
+        self.assertFalse(log[0]['accepted'])
+        self.assertEqual(log[0]['reason'],'containment_lost_after_trim')
+        np.testing.assert_array_equal(masks[0],child)
+        np.testing.assert_array_equal(masks[1],neighbour)
+
 
 if __name__=='__main__':unittest.main()

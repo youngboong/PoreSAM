@@ -311,7 +311,7 @@ class ProjectWorkflow:
                               overlay_relative_path='images/entrance_candidates_overlay.png',
                               status='unreviewed automatic candidates',normalization=project['normalization'],
                               selection='two_stage_nested',two_stage_settings=selected['settings'],
-                              nested_settings=selected['nested_settings'],nested_decisions=selected['nested_decisions'],
+                              two_stage_decisions=selected['decisions'],nested_settings=selected['nested_settings'],nested_decisions=selected['nested_decisions'],
                               candidates=[dict(candidate_id=i,area=int(mask.sum())) for i,mask in masks.items()])
                 (folder/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
                 self.progress(job_id,90,'Saving masks…')

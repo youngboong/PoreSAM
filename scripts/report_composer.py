@@ -1,5 +1,6 @@
 """Editable SEM report composition from measured pores, with local-only drafts."""
 import base64
+import hashlib
 import html
 import io
 import json
@@ -15,9 +16,10 @@ import numpy as np
 from PIL import Image
 
 CONDITIONS = ['기기명', '제조사 및 모델명', '전자총', '가속전압', '분해능', '측정배율', '프로브 지름 / 전류', '작업거리', '검출기']
-METRICS = {'diameter': ('equivalent_diameter_um', '등가원직경 (µm)'),
-           'length': ('length_um', '길이 (µm)'), 'width': ('width_um', '너비 (µm)'),
-           'area': ('area_um2', '면적 (µm²)'), 'aspect': ('aspect_ratio', '종횡비')}
+METRICS = {'length': ('length_um', '길이 (µm)'), 'width': ('width_um', '너비 (µm)'),
+           'aspect': ('aspect_ratio', '종횡비'), 'diameter': ('equivalent_diameter_um', '등가원직경 (µm)'),
+           'roundness': ('roundness', '원형도'), 'area_fraction': ('image_area_percent', '면적분율 (%)'),
+           'area': ('area_um2', '면적 (µm²)')}
 NOTE = '크기 통계와 히스토그램은 이미지 경계에 닿지 않는 pore만 포함한다. 길이·너비는 모멘트 등가 타원의 장축·단축이며 Feret 지름이 아니다. 면적분율은 2차원 투영면적 기준이다.'
 
 
@@ -41,6 +43,15 @@ def values(rows, key):
     return np.array([r[key] for r in rows if not r['touches_image_edge'] and r.get(key) is not None and np.isfinite(r[key])], dtype=float)
 
 
+def fingerprint_assets(assets):
+    for asset in assets:
+        if asset.get('image') and not asset.get('image_key'):
+            with Image.open(io.BytesIO(base64.b64decode(asset['image'].split(',',1)[1]))) as im:
+                im=im.convert('RGBA')
+                asset['image_key']=hashlib.sha256(str(im.size).encode()+im.tobytes()).hexdigest()
+    return assets
+
+
 def content(editor, state):
     cached = state.get('report_content')
     if cached and cached['revision'] == state['revision']: return cached
@@ -61,19 +72,9 @@ def content(editor, state):
     for key, (column, title) in METRICS.items():
         v = values(rows,column)
         fig, ax = plt.subplots(figsize=(6.4,4.4),layout='constrained')
-        ax.tick_params(direction='in',top=True,right=True,width=1.2)
-        for spine in ax.spines.values(): spine.set_linewidth(1.4)
-        if len(v):
-            bins = min(25,max(5,math.ceil(math.sqrt(len(v)))))
-            lo, hi = min(0,float(v.min())),float(v.max())
-            if hi<=lo: hi=lo+1
-            ax.hist(v,bins=np.linspace(lo,hi,bins+1),facecolor='white',edgecolor='#e12626',hatch='\\\\\\',linewidth=1.1)
-        else: ax.text(.5,.5,'경계에 닿지 않는 pore가 없습니다.',transform=ax.transAxes,ha='center')
-        from matplotlib.ticker import MaxNLocator
-        ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-        ax.set(xlabel=title,ylabel='개수',ylim=(0,None))
-        ax.text(.98,.96,f'n = {len(v)}',transform=ax.transAxes,ha='right',va='top',fontsize=9)
-        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=170);plt.close(fig)
+        from pore_details_export import draw_report_histogram
+        draw_report_histogram(ax,v,column,title)
+        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=200);plt.close(fig)
         assets.append(dict(id='hist_'+key,title=title+' 분포',kind='histogram',image='data:image/png;base64,'+base64.b64encode(stream.getvalue()).decode()))
     table = []
     for label, func in [('최솟값',np.min),('최댓값',np.max),('중앙값',np.median),('평균값',np.mean),('표준편차',lambda v:np.std(v,ddof=1) if len(v)>1 else np.nan)]:
@@ -89,7 +90,7 @@ def content(editor, state):
     mean=stats['complete_equivalent_diameter_um_mean'];median=stats['complete_equivalent_diameter_um_median']
     if mean is not None: text+=f' 등가원직경의 평균은 {mean:.3f} µm, 중앙값은 {median:.3f} µm이다.'
     else: text+=' 경계에 닿지 않는 pore가 없어 크기 통계는 산출하지 않았다.'
-    text+=' 이 결과는 현재 분할 마스크의 2차원 측정값에 대한 요약이다.'
+    fingerprint_assets(assets)
     cached=dict(dataset=state['dataset'],revision=state['revision'],name=name,assets=assets,summary=text,stats=stats)
     state['report_content']=cached
     return cached
@@ -192,45 +193,91 @@ def selected(data,options):
             if layout is None:
                 columns=item.get('columns',2);layout=[panels[i:i+columns] for i in range(0,len(panels),columns)]
             gap=20;width=1800;rows=[]
+            all_histograms=all(assets[key]['kind']=='histogram' for key in panels)
             for ids in layout:
-                cell_width=(width-gap*(len(ids)-1))//len(ids);row=[]
+                images=[];factors=[]
                 for key in ids:
                     image=Image.open(io.BytesIO(base64.b64decode(assets[key]['image'].split(',',1)[1]))).convert('RGB')
-                    scale=min(cell_width/image.width,1200/image.height)
-                    row.append(image.resize((max(1,round(image.width*scale)),max(1,round(image.height*scale))),Image.Resampling.LANCZOS))
+                    images.append(image)
+                    factors.append(.77 if assets[key]['kind']=='histogram' and not all_histograms else 1.)
+                # Fit proportional widths at a common height, with no gutters or cells.
+                height=min(1200,width/sum(im.width/im.height for im in images))
+                row=[im.resize((max(1,round(im.width/im.height*height*f)),max(1,round(height*f))),Image.Resampling.LANCZOS) for im,f in zip(images,factors)]
                 rows.append(row)
             heights=[max(im.height for im in row) for row in rows]
-            sheet=Image.new('RGB',(width,sum(heights)+(len(rows)-1)*gap),'white');y=0
+            sheet_width=max(width,max(sum(im.width for im in row) for row in rows))
+            sheet=Image.new('RGB',(sheet_width,sum(heights)+(len(rows)-1)*gap),'white');y=0
             for row,height in zip(rows,heights):
-                cell_width=(width-gap*(len(row)-1))//len(row)
-                for col,im in enumerate(row):sheet.paste(im,(col*(cell_width+gap)+(cell_width-im.width)//2,y+(height-im.height)//2))
+                x=(sheet_width-sum(im.width for im in row))//2
+                for im in row:
+                    sheet.paste(im,(x,y+(height-im.height)//2));x+=im.width
                 y+=height+gap
-            asset=dict(asset,image=data_url(sheet))
-        result.append((item,asset))
+            asset=dict(asset,image=data_url(sheet),kind='histogram' if all_histograms else 'image')
+        result.append((item,dict(asset,panel_count=len(panels))))
     return result
 
 
+def figure_scale(asset):
+    if asset['kind']=='histogram':return .77
+    if asset['kind']=='image' and asset.get('panel_count',1)==1 and asset.get('base_id',asset.get('id'))!='comparison':return .75
+    return 1.
+
+
+def table_widths(count,has_headers):
+    if count==1:return [1.]
+    first=.24 if has_headers else .3
+    return [first]+[(1-first)/(count-1)]*(count-1)
+
+
+def table_header(value):
+    return re.sub(r'\s+(\([^()]+\))$',r'\n\1',str(value))
+
+
+def table_numeric(value):
+    return str(value).strip()=='—' or bool(re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?',str(value).strip()))
+
+
 def table_html(headers,rows):
-    esc=html.escape
-    return '<table>'+('<thead><tr>'+''.join('<th>'+esc(str(v))+'</th>' for v in headers)+'</tr></thead>' if headers else '')+'<tbody>'+''.join('<tr>'+''.join('<td>'+esc(str(v))+'</td>' for v in row)+'</tr>' for row in rows)+'</tbody></table>'
+    esc=html.escape;count=len(headers or (rows[0] if rows else []))
+    if not count:return ''
+    columns='<colgroup>'+''.join(f'<col style="width:{v*100:g}%">' for v in table_widths(count,bool(headers)))+'</colgroup>'
+    heading='<thead><tr>'+''.join('<th scope="col">'+esc(table_header(v)).replace('\n','<br>')+'</th>' for v in headers)+'</tr></thead>' if headers else ''
+    body=''.join('<tr>'+''.join('<td'+(' class="numeric"' if headers and i and table_numeric(v) else '')+'>'+esc(str(v))+'</td>' for i,v in enumerate(row))+'</tr>' for row in rows)
+    return '<table class="publication-table">'+columns+heading+'<tbody>'+body+'</tbody></table>'
 
 
 def render_html(data,options):
     esc=html.escape
     p=lambda s:'<p class="paragraph">'+esc(s or '미입력')+'</p>'
     page='''<!doctype html><html lang="ko"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><style>
-body{font:14px 'Malgun Gothic',sans-serif;color:#111;background:white;width:75%;max-width:760px;box-sizing:border-box;margin:36px auto;padding:0;line-height:1.8}h1{font-size:21px}h2{font-size:16px;margin:26px 0 10px;color:#174366}table{border-collapse:collapse;width:100%;font-size:12px;border-top:1px solid #111;border-bottom:1px solid #111}th,td{padding:7px 10px;text-align:left;border-bottom:1px solid #ddd;overflow-wrap:anywhere}figure{margin:28px 0;break-inside:avoid}figure img{display:block;max-width:100%;max-height:650px;margin:auto}figcaption{text-align:center;font-size:12px;margin-top:8px}.paragraph{white-space:pre-wrap;overflow-wrap:anywhere}.note,.meta{font-size:11px;color:#555}@media print{body{margin:0;max-width:none}h2{break-after:avoid}}@page{size:A4;margin:20mm}</style>'''
+body{font:14px 'Malgun Gothic',sans-serif;color:#111;background:white;width:75%;max-width:760px;box-sizing:border-box;margin:36px auto;padding:0;line-height:1.8}h1{font-size:21px}h2{font-size:16px;margin:26px 0 10px;color:#174366}table{border-collapse:collapse;table-layout:fixed;width:100%;font-size:12px;border-top:1.5px solid #222;border-bottom:1.5px solid #222;font-variant-numeric:tabular-nums}th,td{padding:10px 12px;text-align:left;border:0;overflow-wrap:anywhere;vertical-align:middle}thead{border-bottom:.8px solid #555}th{font-weight:600;text-align:center;line-height:1.5}th:first-child,td:first-child{text-align:left}td.numeric{text-align:right}.table-caption{text-align:left;font-weight:600;margin:0 0 10px}figure{margin:57.6px 0;break-inside:avoid}figure img{display:block;max-width:100%;max-height:650px;margin:auto}figcaption{text-align:center;font-size:12px;margin-top:8px}.paragraph{white-space:pre-wrap;overflow-wrap:anywhere}.note,.meta{font-size:11px;color:#555}@media print{body{margin:0;max-width:none}h2{break-after:avoid}}@page{size:A4;margin:20mm}</style>'''
     page+='<h1>'+esc(options['title'])+'</h1>'
     page+='<h2>가) 분석기기 및 조건</h2>'+table_html([],options['conditions'])
     page+='<h2>나) 분석 방법</h2>'+p(options['method'])+'<h2>다) 분석 결과</h2>'+p(options['results'])
     figures=tables=0
     for item,asset in selected(data,options):
         if asset['kind']=='table':
-            tables+=1;page+=f'<figure><figcaption style="margin:0 0 8px">표 {tables}. '+esc(item['caption'])+'</figcaption>'+table_html(asset['headers'],asset['rows'])+'</figure>'
+            tables+=1;page+=f'<figure><figcaption class="table-caption">표 {tables}. '+esc(item['caption'])+'</figcaption>'+table_html(asset['headers'],asset['rows'])+'</figure>'
         else:
-            figures+=1;page+='<figure><img src="'+asset['image']+'" alt="'+esc(item['caption'],quote=True)+f'"><figcaption>그림 {figures}. '+esc(item['caption'])+'</figcaption></figure>'
+            figures+=1;scale=figure_scale(asset);page+=f'<figure><img style="max-width:{scale*100:g}%;max-height:{650*scale:g}px" src="'+asset['image']+'" alt="'+esc(item['caption'],quote=True)+f'"><figcaption>그림 {figures}. '+esc(item['caption'])+'</figcaption></figure>'
     page+='</html>'
     return page
+
+
+def preview_pdf(editor,data,options):
+    """Render the export PDF in memory; previews never write to the destination."""
+    import secrets
+    stream=io.BytesIO()
+    render_pdf(stream,data,options)
+    previews=getattr(editor,'report_pdf_previews',{})
+    token=secrets.token_hex(16)
+    previews[token]=stream.getvalue()
+    while len(previews)>4:previews.pop(next(iter(previews)))
+    editor.report_pdf_previews=previews
+    url='/report-preview-pdf/'+token+'.pdf'
+    show=getattr(editor,'show_pdf_preview',None)
+    if show:show(url)
+    return dict(url=url,opened=bool(show))
 
 
 def render_pdf(path,data,options):
@@ -262,41 +309,56 @@ def render_pdf(path,data,options):
             if fig is not None: pdf.savefig(fig);plt.close(fig)
             fig=plt.figure(figsize=(8.27,11.69),facecolor='white');number+=1;y=.92
             fig.text(.5,.035,str(number),ha='center',fontsize=9,color='#666')
-        def text(value,size=11,color='#111',gap=.012):
+        def text(value,size=11,color='#111',gap=.012,weight='normal'):
             nonlocal y
             for line in lines(value or '미입력',size=size):
                 if y<.095:new_page()
-                fig.text(left,y,line,va='top',fontsize=size,color=color);y-=size/842*1.75
+                fig.text(left,y,line,va='top',fontsize=size,color=color,fontweight=weight);y-=size/842*1.75
             y-=gap
         def table(headers,rows):
             nonlocal y
-            allrows=([headers] if headers else [])+rows
-            for row in allrows:
-                fractions=[.3,.7] if len(row)==2 else [1/len(row)]*len(row)
-                wrapped=[lines(str(v),page_width*(right-left)*f-8,size=9) for v,f in zip(row,fractions)]
-                height=max(map(len,wrapped))*.019+.014
-                if y-height<.08:new_page()
-                xs=[left+sum(fractions[:i])*(right-left) for i in range(len(row))]
-                for x,ls in zip(xs,wrapped):
-                    for j,line in enumerate(ls):fig.text(x,y-j*.019,line,va='top',fontsize=9)
-                fig.add_artist(plt.Line2D([left,right],[y+.004,y+.004],transform=fig.transFigure,color='#777',linewidth=.45))
+            if not headers and not rows:return
+            count=len(headers or rows[0]);fractions=table_widths(count,bool(headers))
+            padding=6/page_width
+            xs=[left+sum(fractions[:i])*(right-left) for i in range(count)]
+            def rule(weight):
+                fig.add_artist(plt.Line2D([left,right],[y,y],transform=fig.transFigure,color='#222',linewidth=weight))
+            def wrapped_row(row,header=False):
+                return [lines(table_header(v) if header else str(v),page_width*(right-left)*f-12,size=9.5) for v,f in zip(row,fractions)]
+            def draw(row,header=False):
+                nonlocal y
+                wrapped=wrapped_row(row,header);height=max(map(len,wrapped))*.018+.022
+                for i,(x,ls,f) in enumerate(zip(xs,wrapped,fractions)):
+                    align='center' if header and i else 'right' if headers and i and table_numeric(row[i]) else 'left'
+                    anchor=x+f*(right-left)/2 if align=='center' else x+f*(right-left)-padding if align=='right' else x+padding
+                    for j,line in enumerate(ls):fig.text(anchor,y-.011-j*.018,line,ha=align,va='top',fontsize=9.5,fontweight='bold' if header else 'normal',color='#222')
                 y-=height
-            y-=.025
+            rule(1.)
+            if headers:draw(headers,True);rule(.6)
+            for row in rows:
+                height=max(map(len,wrapped_row(row)))*.018+.022
+                if y-height<.08:
+                    rule(1.);new_page();rule(1.)
+                    if headers:draw(headers,True);rule(.6)
+                draw(row)
+            rule(1.);y-=.025
         new_page();text(options['title'],17)
         text('가) 분석기기 및 조건',13,'#174366');table([],options['conditions'])
         text('나) 분석 방법',13,'#174366');text(options['method'])
         text('다) 분석 결과',13,'#174366');text(options['results'])
         figures=tables=0
-        for item,asset in selected(data,options):
+        for index,(item,asset) in enumerate(selected(data,options)):
+            if index:y-=.036
             if asset['kind']=='table':
                 if y<.36:new_page()
-                tables+=1;text(f'표 {tables}. '+item['caption'],10);table(asset['headers'],asset['rows'])
+                tables+=1;text(f'표 {tables}. '+item['caption'],10,weight='bold');table(asset['headers'],asset['rows'])
             else:
                 raw=base64.b64decode(asset['image'].split(',',1)[1]);im=Image.open(io.BytesIO(raw))
-                height=min(.54,(right-left)*8.27/11.69*im.height/im.width)
+                scale=figure_scale(asset);width=(right-left)*scale
+                height=min(.54,(right-left)*8.27/11.69*im.height/im.width)*scale
                 caption_height=len(lines(item['caption'],size=10))*.024+.05
                 if y-height-caption_height<.08:new_page()
-                ax=fig.add_axes([left,y-height,right-left,height]);ax.imshow(im);ax.axis('off');y-=height+.015
+                ax=fig.add_axes([.5-width/2,y-height,width,height]);ax.imshow(im);ax.axis('off');y-=height+.015
                 figures+=1;text(f'그림 {figures}. '+item['caption'],10)
         pdf.savefig(fig);plt.close(fig)
 

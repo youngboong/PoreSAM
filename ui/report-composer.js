@@ -8,7 +8,7 @@
   const reportPayload=()=>reportId?{report_id:reportId}:(state?payload():{});
   function reportApi(name,args){
     if(!reportId)return api(name,args);
-    const actions={'report-content':'refresh','report-save-draft':'save','report-preview':'preview','generate-report':'export','report-conditions-default':'conditions'};
+    const actions={'report-content':'refresh','report-save-draft':'save','report-preview':'preview','report-pdf-preview':'pdf_preview','generate-report':'export','report-conditions-default':'conditions'};
     return api('report-workspace',{...args,report_id:reportId,action:actions[name]});
   }
   function tab(text){
@@ -42,7 +42,7 @@
     for(let i=0;i<2;i++){const input=document.createElement('input');input.value=pair[i];input.maxLength=500;input.placeholder=i?'Enter value':'Condition';input.setAttribute('aria-label',i?'Condition value':'Condition name');input.oninput=changed;row.append(input)}
     const remove=document.createElement('button');remove.textContent='×';remove.title='Remove row';remove.onclick=()=>{row.remove();changed()};row.append(remove);el('reportConditions').append(row);
   }
-  const titles={original:'SEM Original',segmentation:'Pore Segmentation',comparison:'Original / Segmentation',hist_diameter:'Equivalent Diameter Histogram',hist_length:'Length Histogram',hist_width:'Width Histogram',hist_area:'Area Histogram',hist_aspect:'Aspect Ratio Histogram',statistics:'Pore Size Statistics'};
+  const titles={original:'SEM Original',segmentation:'Pore Segmentation',comparison:'Original / Segmentation',hist_diameter:'Equivalent Diameter Histogram',hist_length:'Length Histogram',hist_width:'Width Histogram',hist_area:'Area Histogram',hist_aspect:'Aspect Ratio Histogram',hist_roundness:'Roundness Histogram',hist_area_fraction:'Area Fraction Histogram',statistics:'Pore Size Statistics'};
   const assetTitle=a=>(a.source_name?a.source_name+' / ':'')+(titles[a.base_id||a.id]||a.title);
   function assets(){return [...data.assets,...options.extra_images]}
   function panelRows(item){
@@ -118,13 +118,7 @@
         [['Statistic','Diameter (µm)','Length (µm)','Width (µm)','Aspect ratio'],...asset.rows.map((r,i)=>[['Minimum','Maximum','Median','Mean','Std. deviation'][i],...r.slice(1)])].forEach((values,i)=>{const row=document.createElement('tr');for(const v of values){const cell=document.createElement(i?'td':'th');cell.textContent=v;row.append(cell)}table.append(row)});card.append(table);
       }
       const caption=document.createElement('input');caption.value=item.caption;caption.maxLength=500;caption.setAttribute('aria-label','Caption');caption.placeholder=asset.kind==='table'?'Table caption':'Figure caption';caption.oninput=()=>{item.caption=caption.value;changed()};card.append(caption);
-      const controls=document.createElement('div');controls.className='row';
-      for(const [symbol,delta] of [['↑',-1],['↓',1]]){
-        const button=document.createElement('button');button.textContent=symbol;button.title=delta<0?'Move up':'Move down';button.disabled=index+delta<0||index+delta>=options.items.length;
-        button.dataset.reportOrderDisabled=String(button.disabled);
-        button.onclick=()=>{if(index+delta<0||index+delta>=options.items.length)return;[options.items[index],options.items[index+delta]]=[options.items[index+delta],options.items[index]];changed();renderCards()};controls.append(button);
-      }
-      const removeFigure=document.createElement('button');removeFigure.textContent='Remove '+(asset.kind==='table'?'Table':'Figure');removeFigure.onclick=()=>{options.items.splice(index,1);changed();renderCards()};controls.append(removeFigure);const menu=document.createElement('details');menu.className='report-item-menu';const menuTitle=document.createElement('summary');menuTitle.textContent='Options';menu.append(menuTitle,controls);header.append(menu);container.append(card);
+      const removeFigure=document.createElement('button');removeFigure.innerHTML='<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15"/></svg>';removeFigure.className='report-remove-item';removeFigure.title='Remove '+(asset.kind==='table'?'Table':'Figure');removeFigure.setAttribute('aria-label',removeFigure.title);removeFigure.onclick=()=>{options.items.splice(index,1);changed();renderCards()};header.append(removeFigure);container.append(card);
     });
   }
   function newFigure(){return {id:'figure_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,7),selected:true,caption:'',image_ids:[],columns:1,rows:[]}}
@@ -138,15 +132,67 @@
     pickerKind=kind;pickerTarget=item;pickerOrder=kind==='table'?[]:[...item.image_ids];const container=el('reportContentsChoices');container.replaceChildren();
     el('reportContentsTitle').textContent=kind==='table'?'Add Tables':'Add Contents - Figure '+(options.items.filter(i=>i.id.startsWith('figure_')).indexOf(item)+1);
     const filter=el('reportContentSource');filter.replaceChildren(new Option('All images',''));filter.classList.toggle('hidden',!reportId);for(const source of data.sources??[])filter.add(new Option(source.name,source.dataset));
+    el('addContentsPlot').classList.toggle('hidden',kind==='table');
+    const groups=new Map();
     for(const asset of assets().filter(a=>kind==='table'?a.kind==='table':a.image)){
-      const label=document.createElement('label');label.className='report-content-choice';label.dataset.source=asset.source_dataset||'';
-      const check=document.createElement('input');check.type='checkbox';check.value=asset.id;check.checked=kind!=='table'&&item.image_ids.includes(asset.id);check.onchange=()=>{pickerOrder=pickerOrder.filter(id=>id!==asset.id);if(check.checked)pickerOrder.push(asset.id)};
+      const key=kind==='table'?asset.id:(asset.image_key||asset.image);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(asset);
+    }
+    for(const aliases of groups.values()){
+      const asset=aliases.find(a=>pickerOrder.includes(a.id))||aliases[0];
+      const label=document.createElement('label');label.className='report-content-choice';label.dataset.source=asset.source_dataset||'';label.dataset.sources=JSON.stringify([...new Set(aliases.map(a=>a.source_dataset||''))]);
+      const check=document.createElement('input');check.type='checkbox';check.value=asset.id;check.checked=kind!=='table'&&item.image_ids.includes(asset.id);check.onchange=()=>{pickerOrder=pickerOrder.filter(id=>!aliases.some(a=>a.id===id));if(check.checked)pickerOrder.push(asset.id)};
       const img=document.createElement('img');img.src=asset.image;img.alt=assetTitle(asset);
       const name=document.createElement('span');name.textContent=assetTitle(asset);label.append(check);if(asset.image)label.append(img);label.append(name);container.append(label);
     }
-    el('reportContentsError').textContent='';el('reportContentsDialog').showModal();
+    el('reportContentsError').textContent='';el('applyReportContents').disabled=false;
+    if(kind==='table'&&!container.children.length){
+      el('reportContentsError').textContent='Analyze an image or choose a saved analysis to add a measurement table. Image files alone do not contain pore measurements.';
+      const choose=document.createElement('button');choose.textContent='Choose Saved Analysis';choose.type='button';
+      choose.onclick=()=>{el('reportContentsDialog').close();el('addReportAnalyses').click()};container.append(choose);el('applyReportContents').disabled=true;
+    }
+    el('reportContentsDialog').showModal();
   }
-  el('reportContentSource').onchange=()=>{for(const choice of el('reportContentsChoices').children)choice.classList.toggle('hidden',!!el('reportContentSource').value&&choice.dataset.source!==el('reportContentSource').value)};
+  el('reportContentSource').onchange=()=>{for(const choice of el('reportContentsChoices').children)choice.classList.toggle('hidden',!!el('reportContentSource').value&&!JSON.parse(choice.dataset.sources||'[]').includes(el('reportContentSource').value))};
+  let plotTarget=null;
+  function plotSpec(){return {dataset:el('reportPlotSource').value,kind:el('reportPlotKind').value,x_key:el('reportPlotX').value,y_key:el('reportPlotY').value,bins:el('reportPlotBins').value==='auto'?'auto':Number(el('reportPlotBins').value),exclude_boundary:el('reportPlotExclude').checked}}
+  function plotSettingsChanged(){
+    const scatter=el('reportPlotKind').value==='scatter';el('reportPlotYField').classList.toggle('hidden',!scatter);el('reportPlotBinsField').classList.toggle('hidden',scatter);
+    el('reportPlotPreview').classList.add('hidden');el('reportPlotStatus').textContent='';
+  }
+  async function openPlot(target){
+    plotTarget=target?.id||null;
+    const choices=await api('report-workspace',{action:'plot_choices'});
+    const sources=el('reportPlotSource');sources.replaceChildren();
+    for(const source of choices.sources)sources.add(new Option(source.name,source.dataset));
+    if(state){if(![...sources.options].some(o=>o.value===state.dataset))sources.add(new Option(el('editorImageName').textContent,state.dataset));sources.value=state.dataset}
+    for(const id of ['reportPlotX','reportPlotY']){el(id).replaceChildren();for(const metric of choices.metrics)el(id).add(new Option(metric.label,metric.key))}
+    el('reportPlotX').value='equivalent_diameter_um';el('reportPlotY').value='roundness';plotSettingsChanged();
+    if(!sources.options.length)el('reportPlotStatus').textContent='Analyze an image first to create a measurement plot.';
+    el('reportPlotDialog').showModal();
+  }
+  el('addReportPlot').onclick=()=>work('Loading plot options...',()=>openPlot(null));
+  el('addContentsPlot').onclick=()=>work('Loading plot options...',()=>openPlot(pickerTarget));
+  for(const id of ['reportPlotSource','reportPlotKind','reportPlotX','reportPlotY','reportPlotBins','reportPlotExclude'])el(id).onchange=plotSettingsChanged;
+  el('cancelReportPlot').onclick=()=>el('reportPlotDialog').close();
+  el('previewReportPlot').onclick=()=>work('Preparing plot...',async()=>{
+    el('reportPlotStatus').textContent='Preparing preview...';
+    try{const result=await api('report-workspace',{action:'plot_preview',spec:plotSpec()});el('reportPlotPreview').src=result.image;el('reportPlotPreview').classList.remove('hidden');el('reportPlotStatus').textContent=result.count+' pores';}
+    catch(error){el('reportPlotStatus').textContent=error.message}
+  });
+  el('confirmReportPlot').onclick=()=>work('Adding plot...',async()=>{
+    try{
+      if(!el('reportPlotSource').value)throw new Error('Analyze an image first.');
+      if(options.items.find(i=>i.id===plotTarget)?.image_ids.length>=8)throw new Error('This Figure already has 8 images. Choose another Figure.');
+      await saveCurrent();
+      if(!reportId){const result=await api('report-workspace',{action:'create',datasets:state?[state.dataset]:[],...(data&&state?{import_options:collect()}: {})});await useWorkspace(result)}
+      const result=await api('report-workspace',{action:'add_plot',report_id:reportId,options:collect(),spec:plotSpec()});await useWorkspace(result.report);
+      let target=options.items.find(i=>i.id===plotTarget);
+      if(target&&target.image_ids.length>=8)throw new Error('This Figure already has 8 images. Add the plot to another Figure.');
+      if(!target){target=newFigure();options.items.push(target)}
+      target.image_ids.push(result.asset_id);panelRows(target);tab(false);changed();renderCards();await saveCurrent();await preview();
+      el('reportPlotDialog').close();if(el('reportContentsDialog').open)el('reportContentsDialog').close();status('Plot added');
+    }catch(error){el('reportPlotStatus').textContent=error.message}
+  });
   el('selectAllReportAnalyses').onclick=()=>el('reportAnalysesChoices').querySelectorAll('input').forEach(c=>c.checked=true);
   el('clearReportAnalyses').onclick=()=>el('reportAnalysesChoices').querySelectorAll('input').forEach(c=>c.checked=false);
   el('cancelReportContents').onclick=()=>el('reportContentsDialog').close();
@@ -161,23 +207,58 @@
     panelRows(pickerTarget);changed();renderCards();el('reportContentsDialog').close();
   };
   el('addReportFigure').onclick=()=>{if(options.items.length>=100)return;options.items.push(newFigure());changed();renderCards()};
-  el('addReportTable').onclick=()=>{if(reportId){openContents(null,'table');return}if(options.items.some(i=>i.id==='statistics'))return;options.items.push({id:'statistics',selected:true,caption:'Pore size statistics'});changed();renderCards()};
+  function addTable(asset){
+    const existing=options.items.find(i=>i.id===asset.id);
+    if(existing)existing.selected=true;
+    else options.items.push({id:asset.id,selected:true,caption:(asset.source_name?asset.source_name+' / ':'')+'Pore size statistics'});
+    tab(false);changed();renderCards();
+    [...el('reportContentCards').children].find(card=>card.dataset.id===asset.id)?.scrollIntoView({block:'nearest'});
+  }
+  el('addReportTable').onclick=()=>work('Adding analysis table...',async()=>{
+    if(!data||!options)return;
+    if(state){
+      if(reportId){
+        await saveCurrent();
+        const datasets=data.sources.filter(s=>s.kind!=='folder').map(s=>s.dataset);
+        if(!datasets.includes(state.dataset))datasets.push(state.dataset);
+        const priorItems=new Set(options.items.map(i=>i.id));
+        const result=await api('report-workspace',{action:'refresh',report_id:reportId,datasets,options:collect()});
+        // Adding a table must not insert an extra comparison figure.
+        result.options.items=result.options.items.filter(i=>priorItems.has(i.id));
+        await api('report-workspace',{action:'save',report_id:reportId,options:result.options});
+        await useWorkspace(result);
+        const asset=assets().find(a=>a.kind==='table'&&a.source_dataset===state.dataset);
+        if(asset){addTable(asset);return}
+      }else{
+        await load();const asset=assets().find(a=>a.kind==='table');if(asset){addTable(asset);return}
+      }
+    }
+    const tables=assets().filter(a=>a.kind==='table');
+    if(tables.length===1){addTable(tables[0]);return}
+    openContents(null,'table');
+  });
   function render(){
     el('analysisFrame').classList.add('hidden');el('analysisComparison').closest('section').classList.add('hidden');el('analysisDownloads').replaceChildren();el('generateReport').textContent='Save PDF + HWPX';
     const sources=reportId?data.sources:[{name:data.name,dataset:data.dataset}];
-    el('reportSourcesStatus').textContent=sources.length?`${sources.length} image${sources.length===1?'':'s'} selected`:'Select images for your report.';
+    const folderCount=sources.filter(s=>s.kind==='folder').length,imageCount=sources.filter(s=>s.kind!=='folder').length+(data.folder_assets?.length||0);
+    el('reportSourcesStatus').textContent=sources.length?`${imageCount} images${folderCount?' / '+folderCount+' folders':''}`:'Select images for your report.';
     el('reportSourceChips').replaceChildren();
     for(const source of sources){
       const chip=document.createElement('span');chip.className='report-source-chip';chip.title=source.name;
-      const asset=data.assets.find(a=>(!reportId||a.source_dataset===source.dataset)&&(a.base_id||a.id)==='original');
+      const asset=data.assets.find(a=>(!reportId||a.source_dataset===source.dataset)&&(source.kind==='folder'||(a.base_id||a.id)==='original'));
       if(asset){const image=document.createElement('img');image.src=asset.image;image.alt='';chip.append(image)}
-      const name=document.createElement('span');name.textContent=source.name;chip.append(name);el('reportSourceChips').append(chip);
+      const name=document.createElement('span');name.textContent=source.name;chip.append(name);
+      if(source.kind==='folder'){
+        const remove=document.createElement('button');remove.textContent='\u00d7';remove.title='Remove folder';remove.setAttribute('aria-label','Remove folder '+source.name);
+        remove.onclick=()=>work('Removing folder...',async()=>{await saveCurrent();await useWorkspace(await api('report-workspace',{action:'remove_folder',report_id:reportId,source:source.dataset,options:collect()}))});chip.append(remove);
+      }
+      el('reportSourceChips').append(chip);
     }
     el('analysisTitle').textContent='Report';el('analysisSubtitle').textContent='';
     el('reportTitle').value=options.title;el('reportMethod').value=options.method;el('reportResults').value=options.results;
     el('reportConditions').replaceChildren();options.conditions.forEach(conditionRow);renderCards();
     el('reportComposeBody').classList.remove('hidden');
-    el('reportSummaryStatus').textContent=options.summary_revision!==data.revision?'Pores changed since this text was drafted. Review the text or regenerate the draft.':'Draft based on measurements. Review and edit as needed.';
+    el('reportSummaryStatus').textContent=sources.length&&sources.every(s=>s.kind==='folder')?'Enter results for the imported images.':options.summary_revision!==data.revision?'Pores changed since this text was drafted. Review the text or regenerate the draft.':'Draft based on measurements. Review and edit as needed.';
   }
   async function preview(){
     if(!current())throw new Error('Load / Update Content for the current pore revision first.');
@@ -197,6 +278,7 @@
       data=result;options=result.options;migrateItems();dirty=false;render();status('Saved');await preview();
     }finally{loading=false}
   }
+  window.canOpenReportComposer=()=>!!state||!!reportId;
   window.openReportComposer=()=>work('Loading report...',async()=>{await initWorkspaces();if(!current())await load()});
   el('loadReportContent').onclick=()=>work('Updating report content…',load);
   for(const id of ['reportTitle','reportMethod','reportResults'])el(id).oninput=changed;
@@ -206,6 +288,16 @@
     if(el('reportResults').value!==data.summary&&!confirm('Replace the current results text with a new measurement-based draft?'))return;
     el('reportResults').value=data.summary;options.summary_revision=data.revision;el('reportSummaryStatus').textContent='Draft regenerated from current measurements.';changed();
   };
+  el('previewReportPdf').onclick=()=>work('Preparing PDF preview?',async()=>{
+    if(!current())throw new Error('Load / Update Content for the current pore revision first.');
+    await saveCurrent();
+    const result=await reportApi('report-pdf-preview',{...reportPayload(),options:collect()});
+    if(result.opened)return;
+    el('reportPdfDialog').showModal();
+    await new Promise(requestAnimationFrame);
+    el('reportPdfFrame').src=result.url+'#view=Fit';
+  });
+  el('closeReportPdf').onclick=()=>el('reportPdfDialog').close();
   el('refreshReportPreview').onclick=()=>work('Updating report preview…',preview);
   el('saveReportDraft').onclick=()=>work('Saving draft...',async()=>{await saveCurrent();status('Saved');el('reportMore').open=false});
   el('closeReportImage').onclick=()=>el('reportImageDialog').close();
@@ -253,7 +345,12 @@
     try{localStorage.setItem('poreActiveReport',reportId)}catch{}await reportList();await preview();
   }
   async function initWorkspaces(){
-    if(workspaceReady)return;workspaceReady=true;const reports=await reportList();let active=savedReportId||'';if(!active)try{active=localStorage.getItem('poreActiveReport')||''}catch{}
+    if(workspaceReady)return;
+    const reports=await reportList();workspaceReady=true;
+    // Start from the analysis the user just opened, not an unrelated previous report.
+    // Saved multi-image reports are still available through More > Open report.
+    if(state)return;
+    let active=savedReportId||'';if(!active)try{active=localStorage.getItem('poreActiveReport')||''}catch{}
     if(reports.some(r=>r.id===active)){await useWorkspace(await api('report-workspace',{action:'load',report_id:active}));return}
     if(!state){await useWorkspace(await api('report-workspace',{action:'create',datasets:[]}));}
   }
@@ -269,17 +366,25 @@
     for(const entry of result.images.filter(e=>e.analyses.length)){
       const label=document.createElement('label');label.className='report-analysis-choice';const check=document.createElement('input');check.type='checkbox';
       const image=document.createElement('img');image.src=entry.preview_url;image.alt=entry.name;const title=document.createElement('span');title.textContent=entry.name;
-      const select=document.createElement('select');select.setAttribute('aria-label','Analysis for '+entry.name);
-      for(const a of entry.analyses)select.add(new Option(a.label+(a.revision?' / Revision '+a.revision:''),a.dataset));
-      const included=entry.analyses.find(a=>selected.has(a.dataset));check.checked=!!included;if(included)select.value=included.dataset;
-      label.append(check,image,title);const version=document.createElement('details');version.className='report-analysis-version';const versionTitle=document.createElement('summary');versionTitle.textContent='Analysis version';version.append(versionTitle,select);if(entry.analyses.length<2)version.hidden=true;label.append(version);container.append(label);
+      const included=entry.analyses.find(a=>selected.has(a.dataset));check.checked=!!included;
+      label.dataset.dataset=entry.latest_dataset||entry.analyses[0].dataset;
+      label.append(check,image,title);container.append(label);
     }
     el('reportAnalysesError').textContent=container.children.length?'':'No saved analyses yet.';el('reportAnalysesDialog').showModal();
+  });
+  el('addReportFolders').onclick=()=>work('Choose image folders...',async()=>{
+    await saveCurrent();
+    const picked=await api('choose-report-folders',{});if(!picked.directories?.length)return;
+    if(!reportId){
+      const created=await api('report-workspace',{action:'create',datasets:state?[state.dataset]:[],...(data&&state?{import_options:collect()}: {})});await useWorkspace(created);
+    }
+    const result=await api('report-workspace',{action:'import_folders',report_id:reportId,directories:picked.directories,options:collect()});
+    await useWorkspace(result);status('Folders added. Add a Figure, then choose Add Contents.');
   });
   el('cancelReportAnalyses').onclick=()=>el('reportAnalysesDialog').close();
   el('applyReportAnalyses').onclick=()=>work('Updating report analyses...',async()=>{
     await saveCurrent();
-    const datasets=[...el('reportAnalysesChoices').children].filter(row=>row.querySelector('input').checked).map(row=>row.querySelector('select').value);
+    const datasets=[...el('reportAnalysesChoices').children].filter(row=>row.querySelector('input').checked).map(row=>row.dataset.dataset);
     if(datasets.length>30){el('reportAnalysesError').textContent='Choose up to 30 analyses.';return}
     if(!reportId){
       const created=await api('report-workspace',{action:'create',datasets:state?[state.dataset]:[],...(data&&state?{import_options:collect()}: {})});reportId=created.report_id;data=created;options=created.options;
@@ -291,7 +396,7 @@
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue=''}});
   const updateControls=window.updateWorkspaceControls;
   window.updateWorkspaceControls=()=>{
-    updateControls?.();document.querySelector('[data-panel=analysis]').disabled=busy;
+    updateControls?.();document.querySelector('[data-panel=analysis]').disabled=busy||!window.canOpenReportComposer();
     for(const element of document.querySelectorAll('#reportComposer textarea'))element.disabled=busy;
     for(const button of document.querySelectorAll('[data-report-order-disabled]'))button.disabled=busy||button.dataset.reportOrderDisabled==='true';
   };

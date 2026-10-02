@@ -578,6 +578,11 @@ def make_handler(editor):
         def do_GET(self):
             if not self.valid_host(): return self.send(403,dict(error="Local access only"))
             path=unquote(urlsplit(self.path).path)
+            if path.startswith('/report-preview-pdf/'):
+                token=path[len('/report-preview-pdf/'):].removesuffix('.pdf')
+                pdf=getattr(editor,'report_pdf_previews',{}).get(token)
+                if pdf is None:return self.send(404,dict(error="PDF preview expired. Generate a new preview."))
+                return self.send(200,pdf,'application/pdf')
             if path=="/":
                 return self.send(200,(ROOT/"ui/editor.html").read_bytes(),"text/html; charset=utf-8")
             if path=='/pore-details-window':
@@ -618,9 +623,13 @@ def make_handler(editor):
                 return self.send(403,dict(error="Origin rejected"))
             try:
                 length=int(self.headers.get("Content-Length","0"))
-                limit=45_000_000 if self.path in ['/api/upload','/api/report-workspace','/api/report-save-draft','/api/report-preview','/api/generate-report'] else 1_000_000
+                limit=45_000_000 if self.path in ['/api/upload','/api/report-workspace','/api/report-save-draft','/api/report-preview','/api/report-pdf-preview','/api/generate-report'] else 1_000_000
                 if not 0<length<limit: raise ValueError("Input is too large.")
                 payload=json.loads(self.rfile.read(length))
+                if self.path=='/api/choose-report-folders':
+                    picker=getattr(editor,'report_folder_picker',None)
+                    if picker:return self.send(200,dict(directories=picker()))
+                    raise ValueError('Use the desktop app to select folders.')
                 if self.path=='/api/choose-export-folder':
                     if getattr(editor,'folder_picker',None):
                         return self.send(200,dict(directory=editor.folder_picker()))
@@ -713,16 +722,17 @@ def make_handler(editor):
                         from report_composer import save_conditions_default
                         save_conditions_default(editor,state,payload.get('conditions'))
                         result=dict(saved=True)
-                    elif self.path in ['/api/report-content','/api/report-save-draft','/api/report-preview']:
+                    elif self.path in ['/api/report-content','/api/report-save-draft','/api/report-preview','/api/report-pdf-preview']:
                         if self.path!='/api/report-save-draft': editor.check_revision(state,payload)
-                        from report_composer import load,content,save,validate,render_html
+                        from report_composer import load,content,save,validate,render_html,preview_pdf
                         if self.path=='/api/report-content': result=load(editor,state)
                         elif self.path=='/api/report-save-draft':
                             save(editor,state,payload.get('options'))
                             result=dict(saved=True)
                         else:
                             data=content(editor,state)
-                            result=dict(html=render_html(data,validate(payload.get('options'),data)))
+                            options=validate(payload.get('options'),data)
+                            result=preview_pdf(editor,data,options) if self.path=='/api/report-pdf-preview' else dict(html=render_html(data,options))
                     elif self.path=='/api/generate-report': result=editor.generate_report(state,payload)
                     elif self.path=='/api/export-images':
                         editor.check_revision(state,payload)

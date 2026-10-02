@@ -56,8 +56,8 @@ To create an installer, compile `packaging/PoreSAM.iss` using Inno Setup 6 after
 
 See [tests/README.md](tests/README.md). Browser integration tests use an optional Playwright installation; it is not a runtime dependency.
 
-## Current app snapshot (2026-09-28)
+## Current app snapshot (2026-10-02)
 
 The installed app uses `sam2.1_hiera_small_native16_20260923.pt` (SHA-256 `fe8012962b401003ebcb3092708b04dc8d8d298a5865fec2fdde789301dcb25c`), trained for 300 updates on all 16 corrected images with native-resolution BCE + Dice. This full-data refit has no independent test score. Model weights, local analyses, and built executables are excluded from Git. To reproduce this model selection when building, provide that checkpoint and `checkpoints/default_model.json` with `checkpoint` set to its filename; a clean clone otherwise falls back to the original SAM checkpoint.
 
-Reports support multiple analyzed images, editable text, draggable figure contents, automatic draft saving, and PDF + HWPX export. Pore Details fills the resized window, renders plots at display resolution, and uses readable axes. Histogram bins have integer boundaries, shared with Export Plot; Max bins is an upper limit because integer boundaries can produce fewer bins.
+Reports support multiple analyzed images and imported folders, editable text, draggable figure contents, automatic draft saving, native PDF preview, and PDF + HWPX export. Report tables use a publication style, single photos use 75% scale, and images in a shared row touch without gutters. Image export places comparison, segmentation, colored pores, and the untouched original directly in the chosen folder. Pore Details fills the resized window, renders plots at display resolution, and uses readable axes. Details histogram bins have integer boundaries shared with Export Plot. Report histogram boundaries use 0.5 increments where appropriate, with finer bins for bounded ratios; bars touch. Max bins remains an upper limit.

@@ -301,8 +301,8 @@ print(len(result["boxes"]), out.resolve())
 
 ### 사용자가 선택한 외부 폴더
 
-- **Save Images:** `<선택 폴더>/<이미지명>_images_revision_NNNN_<시각>_<식별자>/`에 `comparison.png`, `segmentation.png`, `pores_colored.png`. 기존 하단 정보 영역을 포함하며, 비교 이미지는 원본 표시와 segmentation을 나란히 붙인다. 원본 파일 자체는 프로젝트의 `input/original.*`에 있다.
-- **Generate Report:** `<선택 폴더>/<이미지명>_report_revision_NNNN_<시각>_<식별자>/`에 `report.pdf`, `report.html`만 내보낸다. 내부 `measurements`의 CSV 등은 데이터 루트에 남는다.
+- **Save Images:** Four files directly in the chosen folder: `<image>_comparison.png`, `<image>_segmentation.png`, `<image>_pores_colored.png`, and `<image>_original.<extension>`. The original upload is copied unchanged; collisions receive numbered filename prefixes.
+- **Generate Report:** Saves PDF and HWPX directly in the selected folder. Add Folders imports images from multiple folders for Figure composition; saved analyses use the latest result without a version selector.
 - **Pore Details의 CSV·그림 저장:** Windows 저장 대화상자에서 선택한 파일 경로.
 - 데스크톱 로그: `<데이터 루트의 상위 폴더>/logs/desktop.log`, `console.log`.
 

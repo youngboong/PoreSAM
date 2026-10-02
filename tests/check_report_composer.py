@@ -91,8 +91,12 @@ def main():
             page.locator('#applyReportContents').click()
             assert group.locator('.report-panel-row').count()==2
             assert group.locator('.report-panel-row').first.locator('.report-panel-image').count()==2
-            group.locator('.report-item-menu > summary').click()
-            group.locator('button[title="Move up"]').click()
+            target=page.locator('.report-card').first
+            transfer=page.evaluate_handle('new DataTransfer()')
+            group.locator('.report-drag-handle').dispatch_event('dragstart',{'dataTransfer':transfer})
+            rect=target.bounding_box()
+            target.dispatch_event('drop',{'dataTransfer':transfer,'clientY':rect['y']+1})
+            transfer.dispose()
             assert page.locator('.report-card').first.locator('strong').inner_text()=='Figure 1'
             page.locator('#reportTextTab').click()
             page.locator('#setReportConditionsDefault').click();page.wait_for_function('!busy')

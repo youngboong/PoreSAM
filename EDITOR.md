@@ -35,7 +35,7 @@ A native Windows window opens and manages its own local server. CPU is the deskt
 1. **Load Image** always opens **New Image**. Import TIF, PNG or JPG (up to 32 MB). Importing an already analyzed file also opens preprocessing; use **Open Analysis** to resume its saved masks.
 
 2. **Preprocess**: confirm the analysis region and calibration. Measure both ends of the scale bar, enter its physical length, then check **Confirm calibration**. Measurement is always horizontal: the second endpoint uses the first endpoint's height, and pixel length is the absolute horizontal distance. Adjust processing while comparing the original and live preview. **Run Analysis** uses **two-stage nested** selection.
-3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**. **Save Images** opens a folder picker and saves `comparison.png` (original left, segmentation right), `segmentation.png`, and `pores_colored.png`. The original footer is retained; color, opacity, and ID visibility follow the display controls. Only saved pore masks are exported, not pending previews.
+3. **Analyze & Edit**: compare the original on the left with segmentation on the right. Edit pores and inspect measurements in **Pore Details**. **Save Images** opens a folder picker and saves four files directly inside the selected folder: `<image>_comparison.png` (original left, segmentation right), `<image>_segmentation.png`, `<image>_pores_colored.png`, and `<image>_original.<original extension>`. The original upload is copied without changing its bytes; repeated exports receive a numbered filename prefix. The original footer is retained; color, opacity, and ID visibility follow the display controls. Only saved pore masks are exported, not pending previews.
 
 4. **Generate Report**: choose a destination with **Browse…**, then **Generate Report**. Each export writes a PDF and an HWPX directly in the chosen destination, with a shared image-based timestamped filename. Image exports use **Save Images** in step 3; the uploaded original and internal measurement files remain in the application data directory.
 
@@ -61,7 +61,7 @@ A native Windows window opens and manages its own local server. CPU is the deskt
 
 
 
-Processing order is normalization → background removal → smoothing. These operations use image intensity, not physical depth. Automatic analysis uses the shared **two-stage nested** method: strict selection, conservative supplementation, then image-based parent/child resolution. Pre-NMS hypotheses are saved for reuse. Automatic candidates may occupy up to 20% of the analysis region; contrast, minimum area and containment filters also apply. Manual additions do not use that area ceiling.
+Processing order is normalization → background removal → smoothing. These operations use image intensity, not physical depth. Automatic analysis uses the shared **two-stage nested** method: strict selection, containment-aware supplementation, then image-based parent/child resolution. A quality- and rim-supported larger candidate replaces smaller masks it covers by at least 95%, before unrelated overlaps are trimmed. Partial overlaps keep the conservative overlap limit; replacement is rechecked after trimming. Separate child rims and a broad bright wall remain subject to nested resolution. Re-run analysis to apply this rule to saved results. Pre-NMS hypotheses are saved for reuse. Automatic candidates may occupy up to 20% of the analysis region; contrast, minimum area and containment filters also apply. Manual additions do not use that area ceiling.
 
 
 For a new pore, draw a **Box** and click **Preview**. Each box is one target: choose one SAM mask and confirm with **Add Pore**. A large mask is not automatically replaced by smaller child candidates, and no local multi-pore search runs for a manual box. Include/Exclude and Update Preview refine that target. Multiple boxes may still be queued and reviewed individually, up to 32 regions.
@@ -221,3 +221,21 @@ Reports default to the title 주사전자현미경(SEM), with no Sample field. T
 HWPX export writes editable paragraphs and tables plus embedded selected figure images using the official package structure (https://tech.hancom.com/hwpxformat/). No installed Hancom software is required to export. The sanitized formatting template is bundled at ui/report-hwpx-template.zip.
 
 Report editing and report pages use approximately 75% width with side margins. PDF paragraphs wrap using measured font widths. Set as Default stores instrument/condition rows for new analysis reports; existing saved drafts retain their own conditions.
+
+Report **Add Folders** supports selecting multiple folders in the desktop picker. Imported PNG, JPEG, TIFF, BMP and WebP images are shown by folder in **Add Contents** and can be combined within a Figure. Report drafts embed these images so they survive source-file changes. Saved analyses use their latest result, with no analysis-version chooser.
+
+After **Analyze & Edit**, **Add Table** inserts the current analysis statistics directly, including in reports assembled from folders. An existing table is selected and brought into view instead of duplicated.
+
+**Add Plot** is available in the report toolbar and in **Add Contents**. Choose an analyzed image, Histogram or Scatter Plot, measurement axes, histogram bin limit, and whether to exclude boundary pores. Preview before adding the plot to a new or existing Figure. Plot settings persist with the report and regenerate when analysis content is refreshed. Add Contents groups pixel-identical images into one choice while preserving existing Figure references.
+
+Report Figures and Tables have a direct red × removal button; use the drag handle to reorder them. Add Plot measurement choices and rendered axes use Korean labels. Generated results omit source filenames and the final measurement disclaimer; use Regenerate Draft to replace an existing results draft.
+
+Default report histograms cover Length, Width, Aspect ratio, Equivalent diameter, Roundness, Area fraction, and Area. Default and custom report histograms share red hatching, inward ticks, Korean labels and panel proportions. Bin edges use 0.5 increments with finer automatic binning and contiguous full-width bars; dimensionless 0–1 metrics use fractional bins over 0–1. Refresh report content to regenerate plots in existing drafts.
+
+Generate Report is disabled at startup until an analysis is opened or completed. Once a report workspace is open, it remains usable for multiple images and imported folders. PDF Preview opens the same A4 PDF renderer used for export in a separate viewer, without choosing a destination or writing output files. Open Analysis cards show image names and the open action without repeated Saved Analyses labels.
+
+Generate Report initially opens the current analysis rather than automatically restoring the previous multi-image report. Existing reports remain available under More > Open report; switching editor images during an open report session preserves the report being edited.
+
+Report layout: histogram figures use 77% of the original width and height (10% larger than the previous 70% setting) in HTML, PDF, and HWPX. Images in a shared row are joined without horizontal gutters, with aspect ratios preserved. Separate figures and tables have increased spacing, with a further 20% increase in the spacing settings.
+
+Standalone SEM/imported photos use 75% report width and height; built-in comparison pairs and multi-panel figures retain their layout. Tables use a three-rule publication style with unit labels on a second header line, aligned numeric values, and no internal row or vertical borders. This applies to HTML, PDF, and editable HWPX.

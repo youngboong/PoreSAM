@@ -11,9 +11,12 @@ A Windows application for SEM pore segmentation, interactive editing and 2D meas
 - Automate supplementation with up to 32 search boxes
 - Synchronized image comparison, zoom and pointer tracking
 - Independent Pore Details window with sortable measurements and plots
-- Separate image and PDF/HTML report exports
+- Four-file image export and editable multi-image reports with PDF + HWPX export
+- PDF preview, folder imports, custom histograms/scatter plots, and publication-style tables
 
 ## Run
+
+Download the [Windows app](https://github.com/youngboong/PoreSAM/releases/latest), extract the complete ZIP, and open `PoreSAM/PoreSAM.exe`. Keep `_internal` beside the executable. Python is not needed for this packaged version.
 
 Follow [DESKTOP.md](DESKTOP.md) to install Python 3.11, CPU dependencies and the model checkpoint, then run:
 

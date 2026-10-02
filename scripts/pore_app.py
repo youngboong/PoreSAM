@@ -83,6 +83,24 @@ def main():
             result=window.create_file_dialog(webview.FileDialog.FOLDER)
             return result[0] if result else ''
         editor.folder_picker=picker
+        editor.report_folder_picker=lambda: list(window.create_file_dialog(webview.FileDialog.FOLDER,allow_multiple=True) or [])
+        pdf_preview={'window':None}
+        def clear_pdf_preview():
+            pdf_preview['window']=None
+        def show_pdf_preview(url):
+            target=base_url+url+'#view=Fit'
+            existing=pdf_preview['window']
+            if existing:
+                existing.load_url(target);existing.show();existing.restore()
+            else:
+                preview=webview.create_window(title+' - PDF Preview',target,width=1100,height=900,min_size=(800,600),background_color='#525659')
+                pdf_preview['window']=preview
+                preview.events.closed+=clear_pdf_preview
+        def close_pdf_preview():
+            if pdf_preview['window']:pdf_preview['window'].destroy()
+        editor.show_pdf_preview=show_pdf_preview
+        window.events.closed+=close_pdf_preview
+
         close_state={'approved':False,'checking':False}
         def check_close():
             # Run outside the native closing event: evaluate_js needs the UI thread.
