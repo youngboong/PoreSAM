@@ -2,7 +2,7 @@
 
 ![SEM pore segmentation example](docs/example.png)
 
-Illustrative comparison on a training image: original SEM, base SAM, and fine-tuned SAM with two-stage nested selection. The example is for this introduction; the downloadable app contains no saved analyses.
+Original SEM (left) and pore segmentation with a different color for each pore (right). The example is for this introduction; the downloadable app contains no saved analyses.
 
 A Windows application for SEM pore segmentation, interactive editing and 2D measurement using SAM 2.1 Small. CPU inference is the default.
 
