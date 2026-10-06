@@ -82,10 +82,10 @@ def export_hwpx(path,data,options):
     ctrl=ET.Element(tag('hp','ctrl'));ET.SubElement(ctrl,tag('hp','colPr'),dict(id='',type='NEWSPAPER',layout='LEFT',colCount='1',sameSz='1',sameGap='0'));run.insert(1,ctrl)
     preview.append(options['title'])
     width=44646
-    def table(headers,rows):
+    def table(headers,rows,column_widths=None):
         allrows=([headers] if headers else [])+rows
         if not allrows:return
-        cols=len(allrows[0]);p,run=paragraph();fractions=table_widths(cols,bool(headers))
+        cols=len(allrows[0]);p,run=paragraph();fractions=column_widths or table_widths(cols,bool(headers))
         widths=[round(width*f) for f in fractions];widths[-1]+=width-sum(widths)
         heights=[max(str(v).count('\n')+1 for v in (list(map(table_header,row)) if headers and i==0 else row))*1350+1100 for i,row in enumerate(allrows)]
         t=copy.deepcopy(templates.find('hp:tbl',NS));t.attrib.update(id=new_id(),rowCnt=str(len(allrows)),colCnt=str(cols),repeatHeader='1' if headers else '0',borderFillIDRef=border_ids[False,False])
@@ -114,7 +114,7 @@ def export_hwpx(path,data,options):
     for index,(item,asset) in enumerate(selected(data,options)):
         if index:paragraph(kind='gap')
         if asset['kind']=='table':
-            table_number+=1;prose(f'표 {table_number}. '+item['caption'],'caption');table(asset['headers'],asset['rows'])
+            table_number+=1;prose(f'표 {table_number}. '+item['caption'],'caption');table(asset['headers'],asset['rows'],asset.get('table_widths'))
             continue
         figure_number+=1;raw=base64.b64decode(asset['image'].split(',',1)[1]);im=Image.open(io.BytesIO(raw)).convert('RGB')
         stream=io.BytesIO();im.save(stream,format='PNG');key=f'image{figure_number}';binaries.append((key,stream.getvalue()))

@@ -40,7 +40,7 @@ def data_url(image):
 
 
 def values(rows, key):
-    return np.array([r[key] for r in rows if not r['touches_image_edge'] and r.get(key) is not None and np.isfinite(r[key])], dtype=float)
+    return np.array([r.get(key) for r in rows if not r['touches_image_edge'] and r.get(key) is not None and np.isfinite(r[key])], dtype=float)
 
 
 def fingerprint_assets(assets):
@@ -50,6 +50,80 @@ def fingerprint_assets(assets):
                 im=im.convert('RGBA')
                 asset['image_key']=hashlib.sha256(str(im.size).encode()+im.tobytes()).hexdigest()
     return assets
+
+
+TABLE_METRICS=['diameter','length','width','aspect','roundness','area','area_fraction']
+TABLE_COLUMN_LABELS=['Statistic','Equivalent diameter (µm)','Length (µm)','Width (µm)','Aspect ratio','Roundness','Area (µm²)','Area fraction (%)']
+TABLE_EXTRA_COLUMNS=[
+    ('angle_deg','각도 (°)','Angle (°)'),
+    ('area_box_ratio','면적/박스','Area/Box'),
+    ('brightness_max','최대 밝기','Brightness max'),
+    ('brightness_mean','평균 밝기','Brightness mean'),
+    ('brightness_min','최소 밝기','Brightness min'),
+    ('brightness_std','밝기 표준편차','Brightness std dev'),
+    ('centroid_x_um','중심 X (µm)','Center X (µm)'),
+    ('centroid_y_um','중심 Y (µm)','Center Y (µm)'),
+    ('convexity','볼록도','Convexity'),
+    ('integral_density','적분 밝기','Integral density'),
+    ('mass_center_x_um','밝기 가중 중심 X (µm)','Mass center X (µm)'),
+    ('mass_center_y_um','밝기 가중 중심 Y (µm)','Mass center Y (µm)'),
+    ('perimeter_um','둘레 (µm)','Perimeter (µm)'),
+    ('rectangle_bottom_um','박스 아래 (µm)','Rectangle bottom (µm)'),
+    ('rectangle_left_um','박스 왼쪽 (µm)','Rectangle left (µm)'),
+    ('rectangle_right_um','박스 오른쪽 (µm)','Rectangle right (µm)'),
+    ('rectangle_top_um','박스 위 (µm)','Rectangle top (µm)'),
+    ('solidity','충실도','Solidity'),
+    ('circularity','원형도','Circularity')
+]
+TABLE_COLUMNS=[(METRICS[key][0],METRICS[key][1],TABLE_COLUMN_LABELS[i+1]) for i,key in enumerate(TABLE_METRICS)]+TABLE_EXTRA_COLUMNS
+TABLE_ROW_LABELS=['Minimum','Maximum','Median','Mean','Std. deviation']
+
+
+def measurement_tables(stats,rows):
+    raw=[]
+    for label,func in [('최솟값',np.min),('최댓값',np.max),('중앙값',np.median),('평균값',np.mean),('표준편차',lambda v:np.std(v,ddof=1) if len(v)>1 else np.nan)]:
+        row=[label]
+        for key,_,_ in TABLE_COLUMNS:
+            v=values(rows,key);x=float(func(v)) if len(v) else np.nan
+            row.append(x if np.isfinite(x) else None)
+        raw.append(row)
+    headers=['통계']+[label for _,label,_ in TABLE_COLUMNS]
+    statistics=dict(id='statistics',title='Pore 크기 통계표',kind='table',
+                    table_data=dict(headers=headers,rows=raw),default_columns=[1,2,3,4],
+                    column_keys=['statistic']+[key for key,_,_ in TABLE_COLUMNS],column_labels=['Statistic']+[label for _,_,label in TABLE_COLUMNS],row_labels=TABLE_ROW_LABELS,table_type='statistics')
+    view=table_view(statistics,{})
+    statistics.update(headers=view['headers'],rows=view['rows'])
+    summary_rows=[['전체 pore 수',int(stats['candidate_count'])],['경계 pore 수',int(stats['edge_candidate_count'])],
+                  ['크기 통계에 포함한 pore 수',int(stats['complete_candidate_count'])],
+                  ['Pore 면적분율 (%)',stats['candidate_union_area_percent']],
+                  ['분석 영역 너비 (µm)',stats['field_width_um']],['분석 영역 높이 (µm)',stats['field_height_um']]]
+    summary=dict(id='analysis_summary',title='Pore 분석 요약표',kind='table',
+                 table_data=dict(headers=['항목','값'],rows=summary_rows),default_columns=[1],integer_rows=[0,1,2],
+                 table_widths=[.7,.3],column_labels=['Measurement','Value'],row_labels=['Total pores','Boundary pores','Pores used in size statistics','Pore area fraction (%)','Field width (µm)','Field height (µm)'],table_type='summary')
+    view=table_view(summary,{})
+    summary.update(headers=view['headers'],rows=view['rows'])
+    for asset in [statistics,summary]:
+        columns=list(range(1,len(asset['table_data']['headers'])))
+        asset['table_formats']={str(precision):table_view(asset,dict(table_columns=columns,table_decimals=precision))['rows'] for precision in range(7)}
+    return [statistics,summary]
+
+
+def table_view(asset,item):
+    catalog=asset.get('table_data',asset)
+    columns=item.get('table_columns',asset.get('default_columns',list(range(1,len(catalog['headers'])))))
+    rows=item.get('table_rows',list(range(len(catalog['rows']))));decimals=item.get('table_decimals',3)
+    result=[]
+    for index in rows:
+        source=catalog['rows'][index];row=[source[0]]
+        for column in columns:
+            value=source[column]
+            if value is None:formatted='—'
+            elif isinstance(value,(int,float)) or table_numeric(value):
+                formatted='—' if str(value)=='—' else str(int(float(value))) if index in asset.get('integer_rows',[]) else f'{float(value):.{decimals}f}'
+            else:formatted=str(value)
+            row.append(formatted)
+        result.append(row)
+    return dict(asset,headers=[catalog['headers'][0]]+[catalog['headers'][i] for i in columns],rows=result)
 
 
 def content(editor, state):
@@ -76,14 +150,7 @@ def content(editor, state):
         draw_report_histogram(ax,v,column,title)
         stream=io.BytesIO();fig.savefig(stream,format='png',dpi=200);plt.close(fig)
         assets.append(dict(id='hist_'+key,title=title+' 분포',kind='histogram',image='data:image/png;base64,'+base64.b64encode(stream.getvalue()).decode()))
-    table = []
-    for label, func in [('최솟값',np.min),('최댓값',np.max),('중앙값',np.median),('평균값',np.mean),('표준편차',lambda v:np.std(v,ddof=1) if len(v)>1 else np.nan)]:
-        row=[label]
-        for key in ['diameter','length','width','aspect']:
-            v=values(rows,METRICS[key][0]); x=float(func(v)) if len(v) else np.nan
-            row.append(f'{x:.3f}' if np.isfinite(x) else '—')
-        table.append(row)
-    assets.append(dict(id='statistics',title='Pore 크기 통계표',kind='table',headers=['통계','등가원직경 (µm)','길이 (µm)','너비 (µm)','종횡비'],rows=table))
+    assets.extend(measurement_tables(stats,rows))
     text=(f"분석 영역 {stats['field_width_um']:.2f} × {stats['field_height_um']:.2f} µm에서 현재 분할된 pore는 {stats['candidate_count']}개이며, "
           f"pore 면적분율은 {stats['candidate_union_area_percent']:.2f}%이다. "
           f"이미지 경계에 닿는 {stats['edge_candidate_count']}개를 제외한 {stats['complete_candidate_count']}개를 크기 통계에 사용하였다.")
@@ -133,6 +200,19 @@ def validate(options, data):
         if not isinstance(item,dict) or (item.get('id') not in allowed and not (isinstance(item.get('id'),str) and re.fullmatch(r'figure_[a-zA-Z0-9_]+',item['id']))) or item['id'] in seen or type(item.get('selected')) is not bool or not isinstance(item.get('caption'),str) or len(item['caption'])>500: raise ValueError('Invalid report content selection.')
         seen.add(item['id'])
     result['items']=[{k:i[k] for k in ['id','selected','caption']} for i in items]
+    tables={a['id']:a for a in data['assets'] if a['kind']=='table'}
+    for source,item in zip(items,result['items']):
+        if item['id'] not in tables:continue
+        asset=tables[item['id']];catalog=asset.get('table_data',asset)
+        for field,limit,minimum in [('table_columns',len(catalog['headers']),1),('table_rows',len(catalog['rows']),0)]:
+            if field not in source:continue
+            chosen=source[field]
+            if not isinstance(chosen,list) or not chosen or any(type(v) is not int or not minimum<=v<limit for v in chosen) or len(set(chosen))!=len(chosen):raise ValueError('Choose at least one valid table column and row.')
+            item[field]=chosen[:]
+        if 'table_decimals' in source:
+            decimals=source['table_decimals']
+            if type(decimals) is not int or not 0<=decimals<=6:raise ValueError('Choose 0 to 6 decimal places.')
+            item['table_decimals']=decimals
     image_ids={a['id'] for a in data['assets']+normalized if a['kind']!='table'}
     for source,item in zip(items,result['items']):
         if item['id'] not in image_ids and not item['id'].startswith('figure_'): continue
@@ -188,6 +268,7 @@ def selected(data,options):
         panels=item.get('image_ids',[item['id']])
         if not panels:continue
         asset=assets[panels[0]] if item['id'].startswith('figure_') else assets[item['id']]
+        if asset['kind']=='table' and any(k in item for k in ['table_columns','table_rows','table_decimals']):asset=table_view(asset,item)
         if asset['kind']!='table' and (len(panels)>1 or panels[0]!=asset['id']):
             layout=item.get('rows')
             if layout is None:
@@ -225,7 +306,7 @@ def figure_scale(asset):
 
 def table_widths(count,has_headers):
     if count==1:return [1.]
-    first=.24 if has_headers else .3
+    first=.18 if has_headers else .3
     return [first]+[(1-first)/(count-1)]*(count-1)
 
 
@@ -237,10 +318,10 @@ def table_numeric(value):
     return str(value).strip()=='—' or bool(re.fullmatch(r'[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?',str(value).strip()))
 
 
-def table_html(headers,rows):
+def table_html(headers,rows,widths=None):
     esc=html.escape;count=len(headers or (rows[0] if rows else []))
     if not count:return ''
-    columns='<colgroup>'+''.join(f'<col style="width:{v*100:g}%">' for v in table_widths(count,bool(headers)))+'</colgroup>'
+    columns='<colgroup>'+''.join(f'<col style="width:{v*100:g}%">' for v in (widths or table_widths(count,bool(headers))))+'</colgroup>'
     heading='<thead><tr>'+''.join('<th scope="col">'+esc(table_header(v)).replace('\n','<br>')+'</th>' for v in headers)+'</tr></thead>' if headers else ''
     body=''.join('<tr>'+''.join('<td'+(' class="numeric"' if headers and i and table_numeric(v) else '')+'>'+esc(str(v))+'</td>' for i,v in enumerate(row))+'</tr>' for row in rows)
     return '<table class="publication-table">'+columns+heading+'<tbody>'+body+'</tbody></table>'
@@ -257,7 +338,7 @@ body{font:14px 'Malgun Gothic',sans-serif;color:#111;background:white;width:75%;
     figures=tables=0
     for item,asset in selected(data,options):
         if asset['kind']=='table':
-            tables+=1;page+=f'<figure><figcaption class="table-caption">표 {tables}. '+esc(item['caption'])+'</figcaption>'+table_html(asset['headers'],asset['rows'])+'</figure>'
+            tables+=1;page+=f'<figure><figcaption class="table-caption">표 {tables}. '+esc(item['caption'])+'</figcaption>'+table_html(asset['headers'],asset['rows'],asset.get('table_widths'))+'</figure>'
         else:
             figures+=1;scale=figure_scale(asset);page+=f'<figure><img style="max-width:{scale*100:g}%;max-height:{650*scale:g}px" src="'+asset['image']+'" alt="'+esc(item['caption'],quote=True)+f'"><figcaption>그림 {figures}. '+esc(item['caption'])+'</figcaption></figure>'
     page+='</html>'
@@ -315,10 +396,10 @@ def render_pdf(path,data,options):
                 if y<.095:new_page()
                 fig.text(left,y,line,va='top',fontsize=size,color=color,fontweight=weight);y-=size/842*1.75
             y-=gap
-        def table(headers,rows):
+        def table(headers,rows,widths=None):
             nonlocal y
             if not headers and not rows:return
-            count=len(headers or rows[0]);fractions=table_widths(count,bool(headers))
+            count=len(headers or rows[0]);fractions=widths or table_widths(count,bool(headers))
             padding=6/page_width
             xs=[left+sum(fractions[:i])*(right-left) for i in range(count)]
             def rule(weight):
@@ -351,7 +432,7 @@ def render_pdf(path,data,options):
             if index:y-=.036
             if asset['kind']=='table':
                 if y<.36:new_page()
-                tables+=1;text(f'표 {tables}. '+item['caption'],10,weight='bold');table(asset['headers'],asset['rows'])
+                tables+=1;text(f'표 {tables}. '+item['caption'],10,weight='bold');table(asset['headers'],asset['rows'],asset.get('table_widths'))
             else:
                 raw=base64.b64decode(asset['image'].split(',',1)[1]);im=Image.open(io.BytesIO(raw))
                 scale=figure_scale(asset);width=(right-left)*scale

@@ -34,3 +34,11 @@ Thumbs.db
 /fine_tuning/datasets/
 /fine_tuning/runs/
 /fine_tuning/models/
+
+# App branch: local development and experiment material
+/fine_tuning/
+/tests/
+/.vscode/
+/EDITOR.md
+/SCRIPTS_GUIDE.md
+/scripts/check_environment.py

@@ -113,9 +113,9 @@ class ProjectWorkflow:
         Image.fromarray(gray).save(folder/'input/normalized.png')
         config = dict(analysis_bottom=bottom, scale_um=None,
                       scale_pixels=scale['length_pixels'] if scale else None,
-                      min_contrast=8, min_area_pixels=100, points_per_side=48,
+                      min_contrast=2, min_area_pixels=100, points_per_side=48,
                       preprocessing_mode='adjustable', normalize_enabled=True,
-                      background_strength=0, blur_method='none', blur_strength=2)
+                      background_strength=2, blur_method='gaussian', blur_strength=0)
         if seed:
             report = json.loads((seed/'report.json').read_text(encoding='utf-8'))
             config.update(analysis_bottom=report['analysis_bottom_exclusive'],

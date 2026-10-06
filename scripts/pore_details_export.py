@@ -48,7 +48,7 @@ UNIT_INTERVAL_KEYS = {'roundness','circularity','solidity','convexity','area_box
 
 def draw_report_histogram(ax, values, key, label, bins='auto'):
     from matplotlib.ticker import MaxNLocator, StrMethodFormatter
-    ax.tick_params(direction='in',top=True,right=True,width=1.2)
+    ax.tick_params(direction='in',top=True,right=True,width=1.2,labelsize=12)
     for spine in ax.spines.values():spine.set_linewidth(1.4)
     ax.grid(False)
     values=np.asarray(values,dtype=float)
@@ -69,9 +69,10 @@ def draw_report_histogram(ax, values, key, label, bins='auto'):
         ax.text(.5,.5,'경계에 닿지 않는 pore가 없습니다.',transform=ax.transAxes,ha='center')
         ax.set_ylim(0,1)
     ax.xaxis.set_major_formatter(StrMethodFormatter('{x:g}'))
-    ax.yaxis.set_major_locator(MaxNLocator(integer=True))
-    ax.set(xlabel=label,ylabel='개수')
-    ax.text(.98,.96,f'n = {len(values)}',transform=ax.transAxes,ha='right',va='top',fontsize=9)
+    ax.yaxis.set_major_locator(MaxNLocator(integer=True,prune='lower'))
+    ax.set_xlabel(label,fontsize=14,fontweight='bold')
+    ax.set_ylabel('개수',fontsize=14,fontweight='bold')
+    ax.text(.98,.96,f'n = {len(values)}',transform=ax.transAxes,ha='right',va='top',fontsize=12)
 
 
 def export_plot(state,payload,*,korean=False):

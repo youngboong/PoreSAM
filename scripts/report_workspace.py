@@ -51,7 +51,7 @@ def rebuild(editor,report,datasets):
     for spec in specs:
         prior=next((a for a in report.get('assets',[]) if a['id']==spec['id']),None)
         revision=editor.state(spec['dataset'])['revision']
-        asset=prior if prior and prior.get('plot_revision')==revision and prior.get('plot_language')=='ko' and prior.get('plot_style')=='report-histogram-v4' else make_plot(editor,spec)
+        asset=prior if prior and prior.get('plot_revision')==revision and prior.get('plot_language')=='ko' and prior.get('plot_style')=='report-histogram-v5' else make_plot(editor,spec)
         assets.append(dict(asset,id=spec['id']))
     report['plots']=specs
     composer.fingerprint_assets(assets)
@@ -129,7 +129,7 @@ def make_plot(editor,spec):
     from report_bundle import source_image
     _,name=source_image(editor,state)
     title=LABELS[x]+' 히스토그램' if kind=='histogram' else LABELS[y]+' vs '+LABELS[x]
-    return dict(kind=kind,title=title,image=result['image'],source_dataset=state['dataset'],source_name=name,plot_revision=state['revision'],plot_language='ko',plot_style='report-histogram-v4',count=result['count'])
+    return dict(kind=kind,title=title,image=result['image'],source_dataset=state['dataset'],source_name=name,plot_revision=state['revision'],plot_language='ko',plot_style='report-histogram-v5',count=result['count'])
 
 
 def handle(editor,payload):

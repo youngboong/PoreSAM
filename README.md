@@ -1,5 +1,9 @@
 # PoreSAM
 
+![SEM pore segmentation example](docs/example.png)
+
+Illustrative comparison on a training image: original SEM, base SAM, and fine-tuned SAM with two-stage nested selection. The example is for this introduction; the downloadable app contains no saved analyses.
+
 A Windows application for SEM pore segmentation, interactive editing and 2D measurement using SAM 2.1 Small. CPU inference is the default.
 
 ## Features
@@ -25,14 +29,15 @@ conda activate pore-app-cpu
 python scripts/pore_app.py
 ```
 
-See [EDITOR.md](EDITOR.md) for the workflow and [SCRIPTS_GUIDE.md](SCRIPTS_GUIDE.md) for Python commands, functions and output locations.
+Defaults: normalization enabled, background removal 2, Gaussian smoothing strength 0, minimum contrast 2, minimum pore area 100 px², and Detailed sampling (48 points per side). Gaussian strength 0 applies no smoothing.
 
 ## Repository
 
 - `scripts/`: application and analysis code
 - `ui/`: interface assets
-- `tests/`: core regression checks
 - `packaging/`: Windows build configuration
 - `requirements.txt`: runtime dependencies
 
 Input images, trained weights, analysis results and compiled applications are excluded from Git. Measurements describe 2D masks; they are not direct measurements of 3D porosity or sphericity.
+
+The `app` branch contains application and build sources. Local experiments, training scripts, test tools, input images and analysis results are excluded. Compiled Windows apps are distributed through Releases.

@@ -18,6 +18,16 @@ datas+=collect_data_files('sam2')+copy_metadata('SAM-2')
 hidden=collect_submodules('sam2')+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
 a=Analysis([str(root/'scripts/pore_app.py')],pathex=[str(root/'scripts')],binaries=[],datas=datas,hiddenimports=hidden,
            excludes=['IPython','ipykernel','jupyter','notebook','PyQt5','PyQt6','PySide2','PySide6','playwright','pytest','tensorboard'],noarchive=False)
+# Library examples, benchmarks and development tools are not application data.
+def runtime_data(entry):
+    name=entry[0].replace('\\','/').lower()
+    unused=('matplotlib/mpl-data/sample_data/','torch/fx/passes/tests/',
+            'torch/testing/_internal/distributed/rpc/examples/',
+            'torch/utils/benchmark/examples/','torch/_export/db/examples/')
+    return not (name.startswith(unused) or name in ('torch/bin/protoc.exe','sam2/benchmark.py')
+                or name.endswith('/readme.txt'))
+a.datas=[entry for entry in a.datas if runtime_data(entry)]
+a.binaries=[entry for entry in a.binaries if runtime_data(entry)]
 pyz=PYZ(a.pure)
 exe=EXE(pyz,a.scripts,[],exclude_binaries=True,name='PoreSAM',debug=False,bootloader_ignore_signals=False,strip=False,upx=False,console=False)
 coll=COLLECT(exe,a.binaries,a.datas,strip=False,upx=False,name='PoreSAM')

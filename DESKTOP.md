@@ -34,7 +34,7 @@ python -c "import sys; sys.path.insert(0, 'scripts'); from pore_app import defau
 
 Use `python scripts/pore_app.py --data-dir .\outputs` to choose the project's output directory. The browser entry point defaults to project-local `outputs`. Avoid editing the same data directory from both entry points concurrently.
 
-The desktop keeps uploads in `<data root>/projects`, revisions in `<data root>/manual_edits`, and logs in the sibling `logs` folder. Installation updates do not remove those files. Additional windows receive independent workspaces and do not share live edits. See [SCRIPTS_GUIDE.md](SCRIPTS_GUIDE.md) for the full layout.
+The desktop keeps uploads in `<data root>/projects`, revisions in `<data root>/manual_edits`, and logs in the sibling `logs` folder. Installation updates do not remove those files. Additional windows receive independent workspaces and do not share live edits.
 
 Pore Details is a separate native window that can move outside its owning editor. CSV and plot exports use a Windows Save As dialog.
 
@@ -52,12 +52,10 @@ Output: `dist/PoreSAM/PoreSAM.exe`. Distribute the entire `dist/PoreSAM` folder,
 
 To create an installer, compile `packaging/PoreSAM.iss` using Inno Setup 6 after building the app. It creates `dist/installer/PoreSAM-Setup-0.1.0.exe` and does not require administrator rights.
 
-## Verification
-
-See [tests/README.md](tests/README.md). Browser integration tests use an optional Playwright installation; it is not a runtime dependency.
-
-## Current app snapshot (2026-10-02)
+## Current app snapshot (2026-10-06)
 
 The installed app uses `sam2.1_hiera_small_native16_20260923.pt` (SHA-256 `fe8012962b401003ebcb3092708b04dc8d8d298a5865fec2fdde789301dcb25c`), trained for 300 updates on all 16 corrected images with native-resolution BCE + Dice. This full-data refit has no independent test score. Model weights, local analyses, and built executables are excluded from Git. To reproduce this model selection when building, provide that checkpoint and `checkpoints/default_model.json` with `checkpoint` set to its filename; a clean clone otherwise falls back to the original SAM checkpoint.
 
 Reports support multiple analyzed images and imported folders, editable text, draggable figure contents, automatic draft saving, native PDF preview, and PDF + HWPX export. Report tables use a publication style, single photos use 75% scale, and images in a shared row touch without gutters. Image export places comparison, segmentation, colored pores, and the untouched original directly in the chosen folder. Pore Details fills the resized window, renders plots at display resolution, and uses readable axes. Details histogram bins have integer boundaries shared with Export Plot. Report histogram boundaries use 0.5 increments where appropriate, with finer bins for bounded ratios; bars touch. Max bins remains an upper limit.
+
+Default settings: brightness normalization On, background removal 2, Gaussian strength 0 (no smoothing), minimum contrast 2, minimum area 100 px², Detailed sampling 48 × 48. Existing saved analysis settings remain unchanged.
