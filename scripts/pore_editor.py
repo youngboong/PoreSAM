@@ -591,7 +591,7 @@ def make_handler(editor):
                 end=source.index('</dialog>',start)+len('</dialog>')
                 page=(ROOT/'ui/details-window.html').read_text(encoding='utf-8').replace('<!--PORE_DETAILS_DIALOG-->',source[start:end])
                 return self.send(200,page.encode('utf-8'),'text/html; charset=utf-8')
-            if path in ['/workspace.js','/workspace.css','/comparison.js','/pore-list.js','/pore-details.js','/pore-columns.js','/region-queue.js','/details-window.js','/report-composer.js']:
+            if path in ['/workspace.js','/workspace.css','/comparison.js','/pore-list.js','/pore-details.js','/pore-columns.js','/region-queue.js','/details-window.js','/report-composer.js','/feedback.js']:
                 return self.send(200,(ROOT/'ui'/path[1:]).read_bytes(),'text/javascript; charset=utf-8' if path.endswith('.js') else 'text/css; charset=utf-8')
             if path=="/api/datasets": return self.send(200,editor.datasets())
             if path=="/api/projects": return self.send(200,dict(projects=editor.workflow.list_projects()))
@@ -623,9 +623,13 @@ def make_handler(editor):
                 return self.send(403,dict(error="Origin rejected"))
             try:
                 length=int(self.headers.get("Content-Length","0"))
-                limit=45_000_000 if self.path in ['/api/upload','/api/report-workspace','/api/report-save-draft','/api/report-preview','/api/report-pdf-preview','/api/generate-report'] else 1_000_000
+                limit=45_000_000 if self.path in ['/api/upload','/api/report-workspace','/api/report-save-draft','/api/report-preview','/api/report-pdf-preview','/api/generate-report','/api/feedback'] else 1_000_000
+                if self.path=='/api/feedback':limit=12_000_000
                 if not 0<length<limit: raise ValueError("Input is too large.")
                 payload=json.loads(self.rfile.read(length))
+                if self.path=='/api/feedback':
+                    from pore_feedback import send_feedback
+                    return self.send(200,send_feedback(payload))
                 if self.path=='/api/choose-report-folders':
                     picker=getattr(editor,'report_folder_picker',None)
                     if picker:return self.send(200,dict(directories=picker()))

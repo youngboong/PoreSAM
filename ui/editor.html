@@ -1,7 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>PoreSAM</title>
 <link rel="stylesheet" href="/workspace.css"></head><body>
-<header><div class="app-brand"><h1>PoreSAM</h1><span>Pore Segmentation &amp; Analysis</span></div></header>
+<header><div class="app-brand"><h1>PoreSAM</h1><span>Pore Segmentation &amp; Analysis</span></div><button id="openFeedback" type="button">Feedback</button></header>
+<dialog id="feedbackDialog" aria-labelledby="feedbackTitle"><h2 id="feedbackTitle">Feedback</h2><p class="hint">Report a bug or share an idea.</p><label class="field">Message<textarea id="feedbackMessage" rows="6" maxlength="5000" placeholder="What happened, or what would you like to improve?"></textarea></label><div class="row"><button id="attachFeedbackImage" type="button">Attach Image</button><span class="hint">You can also paste an image with Ctrl+V.</span></div><input id="feedbackFiles" class="hidden" type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple><div id="feedbackImages"></div><p id="feedbackStatus" class="hint" role="status" aria-live="polite"></p><div class="row feedback-actions"><button id="closeFeedback" type="button">Close</button><button id="sendFeedback" type="button" class="primary">Send</button></div></dialog>
 <nav class="steps" aria-label="Workflow"><button data-panel="load" class="active" aria-current="step">1 <span>Load Image</span></button><button data-panel="setup" disabled>2 <span>Preprocess</span></button><button data-panel="editor" disabled>3 <span>Analyze &amp; Edit</span></button><button data-panel="analysis" disabled>4 <span>Generate Report</span></button></nav>
 <section id="loadPanel" class="workspace-panel">
 <div class="workspace-intro"><h2>Load Image</h2></div>
@@ -206,4 +207,4 @@ document.addEventListener('keydown',event=>{
 });
 $('back').title='Undo Input (Ctrl+Z)';
 (async()=>{try{const data=await (await fetch('/api/datasets')).json();data.datasets.forEach(d=>$('dataset').add(new Option(data.labels?.[d]??d,d)));setStatus('Ready');controls()}catch(e){setStatus('Cannot connect to server: '+e.message,true)}})();
-</script><script src="/workspace.js"></script><script src="/comparison.js"></script><script src="/pore-list.js"></script><script src="/pore-columns.js"></script><script src="/pore-details.js"></script><script src="/region-queue.js"></script><script src="/report-composer.js"></script></body></html>
+</script><script src="/workspace.js"></script><script src="/comparison.js"></script><script src="/pore-list.js"></script><script src="/pore-columns.js"></script><script src="/pore-details.js"></script><script src="/region-queue.js"></script><script src="/report-composer.js"></script><script src="/feedback.js"></script></body></html>

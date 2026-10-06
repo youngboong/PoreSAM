@@ -13,6 +13,7 @@ PoreSAM is a Windows app for analyzing pores in SEM images. Detect pores, edit t
 - Histograms and scatter plots
 - Image export and editable reports for one or multiple images
 - PDF preview and PDF / HWPX export
+- Feedback with text and image attachments
 
 ## Get started
 
