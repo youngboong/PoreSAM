@@ -17,7 +17,8 @@ if manifest.is_file():datas.append((str(manifest),'checkpoints'))
 datas+=collect_data_files('sam2')+copy_metadata('SAM-2')
 hidden=collect_submodules('sam2')+['automate_pores','report_bundle','pore_details_export','app_paths','matplotlib.backends.backend_pdf','matplotlib.backends.backend_svg','matplotlib.backends.backend_agg']
 a=Analysis([str(root/'scripts/pore_app.py')],pathex=[str(root/'scripts')],binaries=[],datas=datas,hiddenimports=hidden,
-           excludes=['IPython','ipykernel','jupyter','notebook','PyQt5','PyQt6','PySide2','PySide6','playwright','pytest','tensorboard'],noarchive=False)
+           hooksconfig={'matplotlib':{'backends':['Agg','pdf','svg']}},
+           excludes=['IPython','ipykernel','jupyter','notebook','PyQt5','PyQt6','PySide2','PySide6','playwright','pytest','tensorboard','tkinter','_tkinter'],noarchive=False)
 # Library examples, benchmarks and development tools are not application data.
 def runtime_data(entry):
     name=entry[0].replace('\\','/').lower()

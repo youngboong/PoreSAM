@@ -636,12 +636,16 @@ def make_handler(editor):
                     raise ValueError('Use the desktop app to select folders.')
                 if self.path=='/api/choose-export-folder':
                     if getattr(editor,'folder_picker',None):
-                        return self.send(200,dict(directory=editor.folder_picker()))
+                        return self.send(200,dict(directory=editor.folder_picker(payload.get('directory',''))))
                     import subprocess,sys
-                    picker="import tkinter as tk; from tkinter import filedialog; r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True); p=filedialog.askdirectory(title='PoreSAM - Select export folder',parent=r); print(p,flush=True); r.destroy()"
-                    selected=subprocess.run([sys.executable,'-c',picker],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                    if selected.returncode:raise ValueError('Cannot open the folder picker. Enter the path manually.')
-                    return self.send(200,dict(directory=selected.stdout.strip()))
+                    from export_folder_picker import ExportFolderPicker
+                    def choose(initial):
+                        picker="import sys; import tkinter as tk; from tkinter import filedialog; r=tk.Tk(); r.withdraw(); r.attributes('-topmost', True); p=filedialog.askdirectory(title='PoreSAM - Select export folder',initialdir=sys.argv[1],parent=r); print(p,flush=True); r.destroy()"
+                        selected=subprocess.run([sys.executable,'-c',picker,initial],capture_output=True,text=True,encoding='utf-8',env={**os.environ,'PYTHONIOENCODING':'utf-8'},creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                        if selected.returncode:raise ValueError('Cannot open the folder picker. Enter the path manually.')
+                        return selected.stdout.strip()
+                    editor.folder_picker=ExportFolderPicker(choose,editor.output_root/'export_folder_default.json')
+                    return self.send(200,dict(directory=editor.folder_picker(payload.get('directory',''))))
                 if self.path=='/api/report-workspace':
                     from report_workspace import handle
                     with editor.lock: return self.send(200,handle(editor,payload))

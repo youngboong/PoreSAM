@@ -12,6 +12,9 @@ LABELS={'length_um':'Length (µm)','width_um':'Width (µm)','aspect_ratio':'Aspe
         'equivalent_diameter_um':'Equivalent diameter (µm)','roundness':'Roundness',
         'area_um2':'Area (µm²)','circularity':'Circularity','image_area_percent':'Area fraction (%)',**EXTRA_LABELS}
 
+REPORT_PLOT_DPI = 600
+REPORT_PLOT_STYLE = 'report-histogram-v6-hires'
+
 KOREAN_LABELS={
     'length_um':'길이 (µm)', 'width_um':'너비 (µm)', 'aspect_ratio':'종횡비',
     'equivalent_diameter_um':'등가원직경 (µm)', 'roundness':'원형도',
@@ -119,6 +122,6 @@ def export_plot(state,payload,*,korean=False):
             ax.set(ylabel=labels[y_key],title=f'산점도 (n={len(rows)})' if korean else f'Scatter plot (n={len(rows)})')
         ax.set_xlabel(labels[x_key]);ax.set_axisbelow(True)
         if not (korean and kind=='histogram'):ax.grid(alpha=.2)
-        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=200)
+        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=REPORT_PLOT_DPI if korean else 200)
         return dict(image='data:image/png;base64,'+base64.b64encode(stream.getvalue()).decode('ascii'),count=len(rows))
     finally:plt.close(fig)

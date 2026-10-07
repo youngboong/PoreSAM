@@ -18,7 +18,7 @@
   el('reportTextTab').onclick=()=>tab(true);el('reportContentTab').onclick=()=>tab(false);
   function collect(){
     if(!options)return null;
-    options.title=el('reportTitle').value;options.sample='';
+    options.title=el('reportTitle').value;options.sample='';options.file_name=el('reportFileName').value;
     options.method=el('reportMethod').value;options.results=el('reportResults').value;
     options.conditions=[...el('reportConditions').children].map(row=>[row.children[0].value,row.children[1].value]);
     return structuredClone(options);
@@ -317,7 +317,7 @@
     openTable();
   });
   function render(){
-    el('analysisFrame').classList.add('hidden');el('analysisComparison').closest('section').classList.add('hidden');el('analysisDownloads').replaceChildren();el('generateReport').textContent='Save PDF + HWPX';
+    el('analysisFrame').classList.add('hidden');el('analysisComparison').closest('section').classList.add('hidden');el('analysisDownloads').replaceChildren();el('generateReport').textContent='Save PDF + HWPX + Word';
     const sources=reportId?data.sources:[{name:data.name,dataset:data.dataset}];
     const folderCount=sources.filter(s=>s.kind==='folder').length,imageCount=sources.filter(s=>s.kind!=='folder').length+(data.folder_assets?.length||0);
     el('reportSourcesStatus').textContent=sources.length?`${imageCount} images${folderCount?' / '+folderCount+' folders':''}`:'Select images for your report.';
@@ -334,7 +334,7 @@
       el('reportSourceChips').append(chip);
     }
     el('analysisTitle').textContent='Report';el('analysisSubtitle').textContent='';
-    el('reportTitle').value=options.title;el('reportMethod').value=options.method;el('reportResults').value=options.results;
+    el('reportTitle').value=options.title;el('reportFileName').value=options.file_name||'SEM_report';el('reportMethod').value=options.method;el('reportResults').value=options.results;
     el('reportConditions').replaceChildren();options.conditions.forEach(conditionRow);renderCards();
     el('reportComposeBody').classList.remove('hidden');
     el('reportSummaryStatus').textContent=sources.length&&sources.every(s=>s.kind==='folder')?'Enter results for the imported images.':options.summary_revision!==data.revision?'Pores changed since this text was drafted. Review the text or regenerate the draft.':'Draft based on measurements. Review and edit as needed.';
@@ -360,7 +360,7 @@
   window.canOpenReportComposer=()=>!!state||!!reportId;
   window.openReportComposer=()=>work('Loading report...',async()=>{await initWorkspaces();if(!current())await load()});
   el('loadReportContent').onclick=()=>work('Updating report content…',load);
-  for(const id of ['reportTitle','reportMethod','reportResults'])el(id).oninput=changed;
+  for(const id of ['reportTitle','reportMethod','reportResults','reportFileName'])el(id).oninput=changed;
   el('addReportCondition').onclick=()=>{if(el('reportConditions').children.length>=20)return;conditionRow(['','']);changed()};
   el('refreshReportSummary').onclick=()=>{
     if(!current()){status('Update content before regenerating the draft.');return}
@@ -385,13 +385,14 @@
     el('reportConditionsDefaultStatus').textContent='Default saved. New analyses will use these conditions.';
   });
   el('generateReport').onclick=()=>work('Saving report…',async()=>{
+    if(!el('reportFileName').value.trim()){el('reportFileName').focus();throw new Error('Enter a file name.');}
     await saveCurrent();if(!current())await load();if(!current())throw new Error('Load report content first.');
     const directory=el('exportDirectory').value.trim();if(!directory)throw new Error('Choose an export folder.');
     el('reportGenerationStatus').textContent='Saving selected content…';
     try{
       const result=await reportApi('generate-report',{...reportPayload(),export_directory:directory,report_options:collect()});
       dirty=false;status('Draft saved');el('exportResult').textContent='Exported to: '+result.exported_folder;el('exportResult').dataset.revisionKey=key();
-      el('reportGenerationStatus').textContent='PDF and HWPX saved in the destination folder.';await preview();
+      el('reportGenerationStatus').textContent='PDF, HWPX and Word saved in the destination folder.';await preview();
       try{localStorage.setItem('poreExportDirectory',directory)}catch{}
     }catch(e){el('reportGenerationStatus').textContent='Export failed: '+e.message;throw e}
   });
@@ -400,7 +401,7 @@
     accepted?.(next);if(reportId){el('analysisTitle').textContent='Report';el('analysisSubtitle').textContent='';}
     // The composer has its own preview; legacy measurement reports stay available on disk.
     el('analysisFrame').classList.add('hidden');el('analysisComparison').closest('section').classList.add('hidden');el('analysisDownloads').replaceChildren();
-    el('generateReport').textContent='Save PDF + HWPX';
+    el('generateReport').textContent='Save PDF + HWPX + Word';
     if(data&&(!reportId?(data.dataset!==next.dataset||data.revision!==next.revision):data.sources.some(s=>s.dataset===next.dataset&&s.revision!==next.revision))){
       status('Pores changed. Update report content.');el('reportPreviewStatus').textContent='Preview is from an earlier analysis revision.';
     }

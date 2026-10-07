@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 import numpy as np
 from datetime import datetime
 import report_composer as composer
+from pore_details_export import REPORT_PLOT_STYLE
 
 
 def folder(editor):
@@ -51,7 +52,7 @@ def rebuild(editor,report,datasets):
     for spec in specs:
         prior=next((a for a in report.get('assets',[]) if a['id']==spec['id']),None)
         revision=editor.state(spec['dataset'])['revision']
-        asset=prior if prior and prior.get('plot_revision')==revision and prior.get('plot_language')=='ko' and prior.get('plot_style')=='report-histogram-v5' else make_plot(editor,spec)
+        asset=prior if prior and prior.get('plot_revision')==revision and prior.get('plot_language')=='ko' and prior.get('plot_style')==REPORT_PLOT_STYLE else make_plot(editor,spec)
         assets.append(dict(asset,id=spec['id']))
     report['plots']=specs
     composer.fingerprint_assets(assets)
@@ -76,6 +77,30 @@ def rebuild(editor,report,datasets):
             key=asset_id(source['dataset'],'comparison')
             options['items'].append(dict(id='figure_'+uuid.uuid4().hex,selected=True,caption=source['name'],image_ids=[key],rows=[[key]],columns=1))
     report['options']=composer.validate(options,report)
+
+
+def upgrade_plot_resolution(editor,report):
+    """Refresh old plot pixels without changing saved text, items or measurements."""
+    changed=False
+    for source in report['sources']:
+        if source.get('kind')=='folder':continue
+        state=editor.state(source['dataset'])
+        if state['revision']!=source['revision']:continue
+        old=[a for a in report['assets'] if a.get('source_dataset')==source['dataset'] and str(a.get('base_id','')).startswith('hist_') and a.get('plot_style')!=REPORT_PLOT_STYLE]
+        if old:
+            fresh={a['id']:a for a in composer.content(editor,state)['assets']}
+            for asset in old:
+                replacement=fresh.get(asset['base_id'])
+                if replacement:
+                    asset.update(image=replacement['image'],plot_style=REPORT_PLOT_STYLE)
+                    asset.pop('image_key',None);changed=True
+        for spec in report.get('plots',[]):
+            if spec['dataset']!=source['dataset']:continue
+            asset=next((a for a in report['assets'] if a['id']==spec['id']),None)
+            if asset and asset.get('plot_style')!=REPORT_PLOT_STYLE:
+                asset.update(make_plot(editor,spec));asset.pop('image_key',None);changed=True
+    if changed:composer.fingerprint_assets(report['assets'])
+    return changed
 
 
 def current(editor,report):
@@ -129,7 +154,7 @@ def make_plot(editor,spec):
     from report_bundle import source_image
     _,name=source_image(editor,state)
     title=LABELS[x]+' 히스토그램' if kind=='histogram' else LABELS[y]+' vs '+LABELS[x]
-    return dict(kind=kind,title=title,image=result['image'],source_dataset=state['dataset'],source_name=name,plot_revision=state['revision'],plot_language='ko',plot_style='report-histogram-v5',count=result['count'])
+    return dict(kind=kind,title=title,image=result['image'],source_dataset=state['dataset'],source_name=name,plot_revision=state['revision'],plot_language='ko',plot_style=REPORT_PLOT_STYLE,count=result['count'])
 
 
 def handle(editor,payload):
@@ -173,6 +198,7 @@ def handle(editor,payload):
         report['options']['items']=old_items
         write(editor,report);return dict(report=report,asset_id=spec['id'])
     if action=='load':
+        if upgrade_plot_resolution(editor,report):write(editor,report)
         composer.fingerprint_assets(report['assets'])
         (folder(editor)/'active.json').write_text(json.dumps(report['report_id']),encoding='utf-8');return report
     if action=='import_folders':
@@ -198,6 +224,7 @@ def handle(editor,payload):
     options=composer.validate(payload.get('options',payload.get('report_options')),report)
     if action=='save':report['options']=options;write(editor,report);return dict(saved=True)
     current(editor,report)
+    if upgrade_plot_resolution(editor,report):write(editor,report)
     if action=='preview':return dict(html=composer.render_html(report,options))
     if action=='pdf_preview':return composer.preview_pdf(editor,report,options)
     report['options']=options;write(editor,report)

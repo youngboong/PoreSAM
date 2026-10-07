@@ -128,7 +128,8 @@ def table_view(asset,item):
 
 def content(editor, state):
     cached = state.get('report_content')
-    if cached and cached['revision'] == state['revision']: return cached
+    from pore_details_export import REPORT_PLOT_DPI, REPORT_PLOT_STYLE
+    if cached and cached['revision'] == state['revision'] and cached.get('plot_style') == REPORT_PLOT_STYLE: return cached
     measured = editor.measurements(state); stats = measured['stats']; rows = measured['candidates']
     from report_bundle import source_image
     _, name = source_image(editor, state)
@@ -148,8 +149,8 @@ def content(editor, state):
         fig, ax = plt.subplots(figsize=(6.4,4.4),layout='constrained')
         from pore_details_export import draw_report_histogram
         draw_report_histogram(ax,v,column,title)
-        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=200);plt.close(fig)
-        assets.append(dict(id='hist_'+key,title=title+' 분포',kind='histogram',image='data:image/png;base64,'+base64.b64encode(stream.getvalue()).decode()))
+        stream=io.BytesIO();fig.savefig(stream,format='png',dpi=REPORT_PLOT_DPI);plt.close(fig)
+        assets.append(dict(id='hist_'+key,title=title+' 분포',kind='histogram',plot_style=REPORT_PLOT_STYLE,image='data:image/png;base64,'+base64.b64encode(stream.getvalue()).decode()))
     assets.extend(measurement_tables(stats,rows))
     text=(f"분석 영역 {stats['field_width_um']:.2f} × {stats['field_height_um']:.2f} µm에서 현재 분할된 pore는 {stats['candidate_count']}개이며, "
           f"pore 면적분율은 {stats['candidate_union_area_percent']:.2f}%이다. "
@@ -158,22 +159,38 @@ def content(editor, state):
     if mean is not None: text+=f' 등가원직경의 평균은 {mean:.3f} µm, 중앙값은 {median:.3f} µm이다.'
     else: text+=' 경계에 닿지 않는 pore가 없어 크기 통계는 산출하지 않았다.'
     fingerprint_assets(assets)
-    cached=dict(dataset=state['dataset'],revision=state['revision'],name=name,assets=assets,summary=text,stats=stats)
+    cached=dict(dataset=state['dataset'],revision=state['revision'],name=name,assets=assets,summary=text,stats=stats,plot_style=REPORT_PLOT_STYLE)
     state['report_content']=cached
     return cached
+
+
+def default_file_name(name):
+    stem=re.sub(r'[^\w.-]+','_',Path(name).stem).strip('._')[:80] or 'SEM'
+    return stem+'_report'
+
+
+def export_file_name(value):
+    if not isinstance(value,str):raise ValueError('Enter a file name.')
+    value=value.strip()
+    if value.lower().endswith(('.pdf','.hwpx','.docx')):value=value.rsplit('.',1)[0]
+    if not value or len(value)>120 or value.endswith('.') or any(ord(c)<32 or c in '<>:"/\\|?*' for c in value):
+        raise ValueError('Enter a valid file name without folder paths or special characters: < > : " / \\ | ? *')
+    if re.fullmatch(r'CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]',value.split('.')[0],re.IGNORECASE):
+        raise ValueError('This file name is reserved by Windows. Choose another name.')
+    return value
 
 
 def defaults(data):
     return dict(title='주사전자현미경(SEM)',sample='',conditions=[[k,''] for k in CONDITIONS],
                 method='',results=data['summary'],summary_revision=data['revision'],
-                items=[],extra_images=[])
+                items=[],extra_images=[],file_name=default_file_name(data.get('name','SEM')))
 
 
 def validate(options, data):
     if not isinstance(options,dict): raise ValueError('Invalid report settings.')
     result={}
-    for key,limit in [('title',200),('sample',300),('method',12000),('results',12000)]:
-        value=options.get(key,'')
+    for key,limit in [('title',200),('sample',300),('method',12000),('results',12000),('file_name',120)]:
+        value=options.get(key,default_file_name(data.get('name','SEM')) if key=='file_name' else '')
         if not isinstance(value,str) or len(value)>limit: raise ValueError('Report text is too long.')
         result[key]=value
     conditions=options.get('conditions',[])
@@ -273,7 +290,7 @@ def selected(data,options):
             layout=item.get('rows')
             if layout is None:
                 columns=item.get('columns',2);layout=[panels[i:i+columns] for i in range(0,len(panels),columns)]
-            gap=20;width=1800;rows=[]
+            gap=20;width=1800;plans=[];density=1.
             all_histograms=all(assets[key]['kind']=='histogram' for key in panels)
             for ids in layout:
                 images=[];factors=[]
@@ -281,12 +298,23 @@ def selected(data,options):
                     image=Image.open(io.BytesIO(base64.b64decode(assets[key]['image'].split(',',1)[1]))).convert('RGB')
                     images.append(image)
                     factors.append(.77 if assets[key]['kind']=='histogram' and not all_histograms else 1.)
-                # Fit proportional widths at a common height, with no gutters or cells.
+                # Keep the page geometry, but choose pixels from the source
+                # resolution instead of shrinking every figure to 1800 px.
                 height=min(1200,width/sum(im.width/im.height for im in images))
-                row=[im.resize((max(1,round(im.width/im.height*height*f)),max(1,round(height*f))),Image.Resampling.LANCZOS) for im,f in zip(images,factors)]
+                density=max(density,max(im.height/(height*f) for im,f in zip(images,factors)))
+                plans.append((images,factors,height))
+            base_height=sum(max(height*f for f in factors) for _,factors,height in plans)+(len(plans)-1)*gap
+            # Bound memory for exceptionally large imported multi-panel figures.
+            density=min(density,math.sqrt(80_000_000/(width*base_height)))
+            pixel_width=round(width*density);gap=round(gap*density);rows=[]
+            for images,factors,height in plans:
+                row=[]
+                for im,f in zip(images,factors):
+                    size=(max(1,round(im.width/im.height*height*f*density)),max(1,round(height*f*density)))
+                    row.append(im if im.size==size else im.resize(size,Image.Resampling.LANCZOS))
                 rows.append(row)
             heights=[max(im.height for im in row) for row in rows]
-            sheet_width=max(width,max(sum(im.width for im in row) for row in rows))
+            sheet_width=max(pixel_width,max(sum(im.width for im in row) for row in rows))
             sheet=Image.new('RGB',(sheet_width,sum(heights)+(len(rows)-1)*gap),'white');y=0
             for row,height in zip(rows,heights):
                 x=(sheet_width-sum(im.width for im in row))//2
@@ -300,7 +328,15 @@ def selected(data,options):
 
 def figure_scale(asset):
     if asset['kind']=='histogram':return .77
-    if asset['kind']=='image' and asset.get('panel_count',1)==1 and asset.get('base_id',asset.get('id'))!='comparison':return .75
+    if asset['kind']=='image' and asset.get('panel_count',1)==1 and asset.get('base_id',asset.get('id'))!='comparison':
+        if asset.get('base_id',asset.get('id')) in ('original','segmentation'):return .75
+        # Imported, prejoined panels have no composition metadata. Give wide
+        # figures the same page width as panels joined inside the composer.
+        name=Path(asset.get('title','')).stem.casefold()
+        if name.endswith('_comparison'):return 1.
+        with Image.open(io.BytesIO(base64.b64decode(asset['image'].split(',',1)[1]))) as image:
+            if image.width>=2*image.height:return 1.
+        return .75
     return 1.
 
 
@@ -439,7 +475,7 @@ def render_pdf(path,data,options):
                 height=min(.54,(right-left)*8.27/11.69*im.height/im.width)*scale
                 caption_height=len(lines(item['caption'],size=10))*.024+.05
                 if y-height-caption_height<.08:new_page()
-                ax=fig.add_axes([.5-width/2,y-height,width,height]);ax.imshow(im);ax.axis('off');y-=height+.015
+                ax=fig.add_axes([.5-width/2,y-height,width,height]);ax.imshow(im,interpolation='none');ax.axis('off');y-=height+.015
                 figures+=1;text(f'그림 {figures}. '+item['caption'],10)
         pdf.savefig(fig);plt.close(fig)
 
@@ -453,20 +489,28 @@ def export(editor,state,directory,options):
 
 def export_data(data,options,directory,name):
     from report_hwpx import export_hwpx
+    from report_docx import export_docx
     if not isinstance(directory,str) or not directory.strip():raise ValueError('Choose a destination folder.')
     destination=Path(directory.strip()).expanduser()
     if not destination.is_absolute():raise ValueError('Enter the full destination folder path.')
+    requested=options.get('file_name')
+    if requested is not None:
+        requested=export_file_name(requested)
+    else:
+        requested=f'{default_file_name(name)}_{datetime.now():%Y%m%d_%H%M%S_%f}'
     destination=destination.resolve();destination.mkdir(parents=True,exist_ok=True)
-    stem=re.sub(r'[^\w.-]+','_',Path(name).stem).strip('._')[:60] or 'SEM'
-    base=f'{stem}_report_{datetime.now():%Y%m%d_%H%M%S_%f}'
-    # Stage privately; the chosen destination receives only the two final reports.
+    base=requested;number=2
+    while any((destination/f'{base}.{suffix}').exists() for suffix in ['pdf','hwpx','docx']):
+        base=f'{requested} ({number})';number+=1
+    # Stage privately; the chosen destination receives only the final reports.
     with tempfile.TemporaryDirectory(prefix='poresam_report_') as temporary:
         folder=Path(temporary)
         render_pdf(folder/'report.pdf',data,options)
         export_hwpx(folder/'report.hwpx',data,options)
+        export_docx(folder/'report.docx',data,options)
         created=[]
         try:
-            for suffix in ['pdf','hwpx']:
+            for suffix in ['pdf','hwpx','docx']:
                 path=destination/f'{base}.{suffix}'
                 with path.open('xb') as target:
                     created.append(path);target.write((folder/f'report.{suffix}').read_bytes())

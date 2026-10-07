@@ -259,7 +259,7 @@ window.onEditorAccepted=data=>{
   if(ready){$('analysisFrame').src=data.report_url;$('analysisComparison').src=data.image_url}
   else{$('analysisFrame').removeAttribute('src');$('analysisComparison').removeAttribute('src')}
   if(!$('exportDirectory').value){try{$('exportDirectory').value=localStorage.getItem('poreExportDirectory')||data.export_default_directory||''}catch{$('exportDirectory').value=data.export_default_directory||''}}
-  $('generateReport').textContent=ready?'Save Report':'Generate Report';
+  $('generateReport').textContent='Save PDF + HWPX + Word';
   if($('exportResult').dataset.revisionKey!==data.dataset+':'+data.revision)$('exportResult').textContent='';
   $('reportGenerationStatus').textContent=ready?'Report ready.':'Ready to generate.';
   $('analysisDownloads').replaceChildren();
@@ -277,7 +277,7 @@ $('generateReport').onclick=()=>work('Generating report…',async()=>{
   try{const data=await api('generate-report',{...payload(),export_directory:directory});await accept(data);$('exportResult').textContent='Exported to: '+data.exported_folder;$('exportResult').dataset.revisionKey=data.dataset+':'+data.revision;try{localStorage.setItem('poreExportDirectory',directory)}catch{}setStatus('Report saved.')}
   catch(error){$('reportGenerationStatus').textContent='Export failed: '+error.message+' Please retry.';throw error}
 });
-$('chooseExportDirectory').onclick=()=>work('Choose a folder.',async()=>{const result=await api('choose-export-folder',{});if(result.directory)$('exportDirectory').value=result.directory;setStatus('Export folder selected.')});
+$('chooseExportDirectory').onclick=()=>work('Choose a folder.',async()=>{const result=await api('choose-export-folder',{directory:$('exportDirectory').value});if(result.directory)$('exportDirectory').value=result.directory;setStatus('Export folder selected.')});
 window.updateToolLayout=()=>{
   const selecting=mode==='select',cutting=mode==='cut';
   $('selectionActions').classList.toggle('hidden',!selecting);

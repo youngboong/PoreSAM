@@ -79,10 +79,11 @@ def main():
         window=webview.create_window(title,base_url,width=1440,height=960,min_size=(1024,720),text_select=True,background_color='#edf2f3',js_api=details)
         details._main=window;details._url=base_url;details._title=title+' - Pore Details'
         window.events.closed+=details.close_details
-        def picker():
-            result=window.create_file_dialog(webview.FileDialog.FOLDER)
+        from export_folder_picker import ExportFolderPicker
+        def picker(initial):
+            result=window.create_file_dialog(webview.FileDialog.FOLDER,directory=initial)
             return result[0] if result else ''
-        editor.folder_picker=picker
+        editor.folder_picker=ExportFolderPicker(picker,directory/'export_folder_default.json')
         editor.report_folder_picker=lambda: list(window.create_file_dialog(webview.FileDialog.FOLDER,allow_multiple=True) or [])
         pdf_preview={'window':None}
         def clear_pdf_preview():
